@@ -7,3 +7,7 @@ To install:
 4. Navigate to the AudioProcessing directory and run `make` to build the firmware
 5. Follow the instructions in the libDaisy documentation to flash the firmware onto the Daisy Seed
 The firmware is located in the `AudioProcessing` directory, and the main source file is `Blink.cpp`. The Makefile is set up to compile this source file and link it with the libDaisy and DaisySP libraries.
+
+
+nix develop --extra-experimental-features nix-command --extra-experimental-features flakes
+
