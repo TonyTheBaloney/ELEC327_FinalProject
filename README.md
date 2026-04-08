@@ -11,3 +11,6 @@ The firmware is located in the `AudioProcessing` directory, and the main source 
 
 nix develop --extra-experimental-features nix-command --extra-experimental-features flakes
 
+
+Check this link for help: https://gemini.google.com/share/752ff1b4bd42
+
