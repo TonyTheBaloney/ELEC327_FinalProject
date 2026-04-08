@@ -1,0 +1,6 @@
+[submodule "AudioProcessing/libDaisy"]
+	path = AudioProcessing/libDaisy
+	url = https://github.com/electro-smith/libDaisy.git
+[submodule "AudioProcessing/DaisySP"]
+	path = AudioProcessing/DaisySP
+	url = https://github.com/electro-smith/DaisySP.git
