@@ -57,8 +57,7 @@ $(BUILD_DIR)/%.o: src/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # ==== Link ====
-$(TARGET_ELF): $(OBJECTS) $(LIBDAISY_LIB) $(DAISYSP_LIB)
-	$(CXX) $(OBJECTS) $(LIBS) $(LDFLAGS) -o $@
+$(TARGET_ELF): $(OBJECTS) libs
 
 # ==== Convert to BIN ====
 $(TARGET_BIN): $(TARGET_ELF)
@@ -68,6 +67,10 @@ $(TARGET_BIN): $(TARGET_ELF)
 # ==== Build dir ====
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+libs:
+	$(MAKE) -C $(LIBDAISY_DIR)
+	$(MAKE) -C $(DAISYSP_DIR)
 
 # ==== Flash ====
 flash: $(TARGET_BIN)
