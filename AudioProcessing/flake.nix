@@ -2,7 +2,7 @@
   description = "Daisy Seed development environment";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/22.11"; # older, stable for gcc-arm-embedded
+    nixpkgs.url = "github:NixOS/nixpkgs/22.05"; # older, stable for gcc-arm-embedded
     flake-utils.url = "github:numtide/flake-utils";
   };
 
