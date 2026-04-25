@@ -15,6 +15,7 @@ TARGET = MyDaisyProject
 # -------------------------------------------------------
 LIBDAISY_DIR ?= ./libDaisy
 DAISYSP_DIR  ?= ./DaisySP
+DAISYSP_LGPL_DIR = $(PROJECT_DIR)/DaisySP/DaisySP-LGPL/Source
 
 # Source directory
 SRC_DIR  = src
@@ -67,28 +68,29 @@ C_DEFS = \
 # -------------------------------------------------------
 LIBDAISY_INCLUDES = $(shell find $(LIBDAISY_DIR)/src $(LIBDAISY_DIR)/Drivers $(LIBDAISY_DIR)/Middlewares \
 	-type d | sed 's/^/-I/')
-DAISYSP_INCLUDES  = $(shell find $(DAISYSP_DIR)/Source \
+DAISYSP_INCLUDES  = $(shell find $(DAISYSP_DIR)/Source $(DAISYSP_DIR)/DaisySP-LGPL \
 	-type d | sed 's/^/-I/')
 
-C_INCLUDES = -I$(SRC_DIR) $(LIBDAISY_INCLUDES) $(DAISYSP_INCLUDES)
+DAISYSP_LGPL_INCLUDES = $(shell find $(DAISYSP_LGPL_DIR) \
+	-type d | sed 's/^/-I/')
 
+C_INCLUDES = -I$(SRC_DIR) $(LIBDAISY_INCLUDES) $(DAISYSP_INCLUDES) $(DAISYSP_LGPL_INCLUDES)
 # -------------------------------------------------------
 # Compiler flags
 # -------------------------------------------------------
 OPTIMIZE = -O2
 
 COMMON_FLAGS = \
-	$(MCU) \
-	$(C_DEFS) \
-	$(C_INCLUDES) \
-	$(OPTIMIZE) \
-	-Wall \
-	-Wno-missing-attributes \
-	-Wno-array-bounds \
-	-Wno-stringop-overflow \
-	-fdata-sections \
-	-ffunction-sections \
-	-nostdlib \
+    $(MCU) \
+    $(C_DEFS) \
+    $(C_INCLUDES) \
+    $(OPTIMIZE) \
+    -Wall \
+    -Wno-missing-attributes \
+    -Wno-array-bounds \
+    -Wno-stringop-overflow \
+    -fdata-sections \
+    -ffunction-sections \
 
 CFLAGS   = $(COMMON_FLAGS) -std=gnu11 \
 	-Wno-int-conversion \
@@ -102,17 +104,22 @@ ASFLAGS = $(MCU) -Wall -fdata-sections -ffunction-sections
 # Linker flags
 # -------------------------------------------------------
 LDFLAGS = \
-	$(MCU) \
-	-T$(LDSCRIPT) \
-	-L$(LIBDAISY_DIR)/build \
-	-L$(DAISYSP_DIR)/build \
-	-ldaisy \
-	-ldaisysp \
-	-lc -lm -lnosys \
-	--specs=nano.specs \
-	-Wl,--gc-sections \
-	-Wl,-Map=$(BUILD_DIR)/$(TARGET).map,--cref \
-	-Wl,--print-memory-usage
+    $(MCU) \
+    -T$(LDSCRIPT) \
+    --specs=nano.specs \
+    --specs=nosys.specs \
+    -L$(LIBDAISY_DIR)/build \
+    -L$(DAISYSP_DIR)/build \
+	-L$(DAISYSP_DIR)/DaisySP-LGPL/build \
+    -ldaisy \
+    -ldaisysp \
+	-ldaisysp-lgpl \
+    -lc -lm \
+    -Wl,--gc-sections \
+    -Wl,-Map=$(BUILD_DIR)/$(TARGET).map,--cref \
+    -Wl,--print-memory-usage
+
+	
 
 # -------------------------------------------------------
 # Object files

@@ -1,113 +1,343 @@
-#include "daisy.h"
+/**
+ * DaisySeed Guitar Pedal
+ *
+ * Hardware:
+ *   - 4x Analog Potentiometers  (wiper → ADC pin, modify effect parameters)
+ *   - 1x Toggle Switch (TOP)    → ON = pots write to current effect state
+ *   - 1x Toggle Switch (BOTTOM) → ON = audio passthrough (true bypass)
+ *   - 1x Momentary Push Button  → cycles through effect presets
+ *
+ * Pot wiring:
+ *   Wiper    → ADC pin  (seed::A0–A3)
+ *   One end  → 3V3
+ *   Other end→ GND
+ *
+ * Effect Presets (cycled by push button):
+ *   0 – Overdrive  (pot0=drive, pot1=tone,     pot2=level,    pot3=spare)
+ *   1 – Chorus     (pot0=rate,  pot1=depth,    pot2=mix,      pot3=spare)
+ *   2 – Reverb     (pot0=room,  pot1=damping,  pot2=wet,      pot3=spare)
+ *   3 – Phaser     (pot0=rate,  pot1=depth,    pot2=feedback, pot3=spare)
+ */
+
 #include "daisy_seed.h"
+#include "daisysp.h"
+#include "Effects/reverbsc.h"
 
-// Use the daisy namespace to prevent having to type
-// daisy:: before all libdaisy functions
 using namespace daisy;
+using namespace daisysp;
 
-// Declare a DaisySeed object called hardware
-DaisySeed hardware;
+// ──────────────────────────────────────────────
+// Pin Assignments
+// Use integer indices for GetPin(); ADC pins use seed::A0-style Pin directly.
+// ──────────────────────────────────────────────
 
-#define POTENTIOMETER_PIN_ONE 23
-#define POTENTIOMETER_PIN_TWO 25
-#define POTENTIOMETER_PIN_THREE 27
-#define POTENTIOMETER_PIN_FOUR 29
-#define BUTTON_PIN_ONE 2
-#define BUTTON_PIN_TWO 3
+// Potentiometer wipers — passed directly to AdcChannelConfig::InitSingle
+static const Pin POT0_PIN = seed::A0;
+static const Pin POT1_PIN = seed::A1;
+static const Pin POT2_PIN = seed::A2;
+static const Pin POT3_PIN = seed::A3;
 
-#define MSPM0_SDA_PIN 6
-#define MSPM0_SCL_PIN 7
+// Digital switch pin indices (uint8_t) for hw.GetPin()
+static constexpr uint8_t PIN_TOGGLE_EDIT        = 0;   // D0 → top toggle
+static constexpr uint8_t PIN_TOGGLE_PASSTHROUGH = 1;   // D1 → bottom toggle
+static constexpr uint8_t PIN_BTN_EFFECT_CYCLE   = 2;   // D2 → push button
 
-typedef struct {
-    uint8_t potentiometer_one;
-    uint8_t potentiometer_two;
-    uint8_t potentiometer_three;
-    uint8_t potentiometer_four;
-    uint8_t button_one;
-    uint8_t button_two;
-    // The state we're currently in for the MSP to display
-}ControlState;
+// ──────────────────────────────────────────────
+// ADC channel indices (must match Init order)
+// ──────────────────────────────────────────────
+static constexpr int ADC_POT0 = 0;
+static constexpr int ADC_POT1 = 1;
+static constexpr int ADC_POT2 = 2;
+static constexpr int ADC_POT3 = 3;
+static constexpr int NUM_ADC  = 4;
+static constexpr int NUM_POTS = 4;
 
-static ControlState control_state;
+// ──────────────────────────────────────────────
+// Constants
+// ──────────────────────────────────────────────
 
-void AudioPassthroughCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
+static constexpr int   NUM_EFFECTS  = 4;
+static constexpr float SAMPLE_RATE  = 48000.f;
+static constexpr float ADC_DEADBAND = 0.005f;   // ~0.5% — suppresses pot noise
+
+// ──────────────────────────────────────────────
+// Effect Parameter State
+// ──────────────────────────────────────────────
+
+enum Effect : uint8_t
 {
-    // This callback is called when the audio system needs more data to play.
-    // The input and output buffers are passed as arguments, along with the
-    // number of samples that need to be processed.
+    EFFECT_OVERDRIVE = 0,
+    EFFECT_CHORUS,
+    EFFECT_REVERB,
+    EFFECT_PHASER
+};
 
-    // For this example, we'll just copy the input buffer to the output buffer,
-    // effectively creating a "pass-through" effect.
-    for(size_t i = 0; i < size; i++)
+struct EffectState
+{
+    float params[NUM_POTS];   // normalised 0–1, one per pot
+};
+
+static EffectState effectStates[NUM_EFFECTS] = {
+    {{ 0.5f, 0.5f, 0.5f, 0.5f }},   // Overdrive
+    {{ 0.3f, 0.5f, 0.5f, 0.5f }},   // Chorus
+    {{ 0.6f, 0.5f, 0.5f, 0.5f }},   // Reverb
+    {{ 0.4f, 0.5f, 0.3f, 0.5f }},   // Phaser
+};
+
+// ──────────────────────────────────────────────
+// Global hardware & DSP objects
+// ──────────────────────────────────────────────
+
+DaisySeed hw;
+
+Switch toggleEdit;
+Switch togglePassthrough;
+Switch btnEffectCycle;
+
+Overdrive overdrive;
+Chorus    chorus;
+ReverbSc    reverb;   // daisysp::Reverb (not ReverbSc)
+Phaser    phaser;
+
+// ──────────────────────────────────────────────
+// Runtime state
+// ──────────────────────────────────────────────
+
+uint8_t currentEffect  = EFFECT_OVERDRIVE;
+bool    passthrough    = false;
+bool    editingEnabled = false;
+bool    prevEditing    = false;
+
+float lastPotValue[NUM_POTS] = { -1.f, -1.f, -1.f, -1.f };
+
+// ──────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────
+
+inline float clamp01(float v)
+{
+    return v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
+}
+
+inline float ReadPot(int ch)
+{
+    return clamp01(hw.adc.GetFloat(ch));
+}
+
+// Snapshot current pot positions — pick-up / catch-up deadband baseline.
+void SyncPotBaseline()
+{
+    for (int i = 0; i < NUM_POTS; i++)
+        lastPotValue[i] = ReadPot(i);
+}
+
+// ──────────────────────────────────────────────
+// Apply saved state → DSP objects
+// ──────────────────────────────────────────────
+
+void ApplyEffectState()
+{
+    const EffectState& s = effectStates[currentEffect];
+
+    switch (static_cast<Effect>(currentEffect))
     {
-        out[1][i] = in[1][i]; // Right channel
-        out[0][i] = in[0][i]; // Left channel
+        case EFFECT_OVERDRIVE:
+            overdrive.SetDrive(s.params[0]);
+            break;
+
+        case EFFECT_CHORUS:
+            chorus.SetLfoFreq(s.params[0] * 5.f);   // 0–5 Hz
+            chorus.SetDelay(s.params[1]);
+            break;
+
+        case EFFECT_REVERB:
+            reverb.SetFeedback(s.params[0]);
+            reverb.SetLpFreq(s.params[1] * 18000.f);
+            break;
+
+        case EFFECT_PHASER:
+            phaser.SetFreq(s.params[0] * 10.f);     // 0–10 Hz
+            phaser.SetFeedback(s.params[2]);
+            break;
     }
 }
 
+// ──────────────────────────────────────────────
+// Audio Callback
+// ──────────────────────────────────────────────
 
-int main(void)
+void AudioCallback(AudioHandle::InputBuffer  in,
+                   AudioHandle::OutputBuffer out,
+                   size_t                    size)
 {
-    // Declare a variable to store the state we want to set for the LED.
-    bool led_state;
-    led_state = true;
+    const EffectState& s = effectStates[currentEffect];
 
-    // Configure and Initialize the Daisy Seed
-    // These are separate to allow reconfiguration of any of the internal
-    // components before initialization.
-    hardware.Configure();
-    hardware.Init();
-    hardware.SetAudioBlockSize(4);
-
-    // Initializing the ADC for the potentiometers.
-    AdcChannelConfig adc_config;
-    adc_config.InitSingle(hardware.GetPin(POTENTIOMETER_PIN_ONE));
-    adc_config.InitSingle(hardware.GetPin(POTENTIOMETER_PIN_TWO));
-    adc_config.InitSingle(hardware.GetPin(POTENTIOMETER_PIN_THREE));
-    adc_config.InitSingle(hardware.GetPin(POTENTIOMETER_PIN_FOUR));
-    hardware.adc.Init(&adc_config, 5);
-    hardware.adc.Start();
-    
-    // Initialize button 
-    GPIO button_gpio;
-    button_gpio.Init(hardware.GetPin(BUTTON_PIN_ONE), GPIO::Mode::INPUT, GPIO::Pull::PULLUP);
-    GPIO button_gpio_two;
-    button_gpio_two.Init(hardware.GetPin(BUTTON_PIN_TWO), GPIO::Mode::INPUT, GPIO::Pull::PULLUP);
-    
-
-    // Setting up I2C for communication with the MSPM0
-    daisy::I2CHandle::Config i2c_config;
-    i2c_config.periph = I2CHandle::Config::Peripheral::I2C_1;
-    i2c_config.mode = I2CHandle::Config::Mode::I2C_MASTER;
-    i2c_config.speed = I2CHandle::Config::Speed::I2C_400KHZ;
-    i2c_config.pin_config.scl = hardware.GetPin(MSPM0_SCL_PIN);
-    i2c_config.pin_config.sda = hardware.GetPin(MSPM0_SDA_PIN);
-    
-    daisy::I2CHandle i2c;
-    if (i2c.Init(i2c_config) != I2CHandle::Result::OK)
+    for (size_t i = 0; i < size; i++)
     {
-        // Handle error
+        float inL = in[0][i];
+        float inR = in[1][i];
+
+        if (passthrough)
+        {
+            out[0][i] = inL;
+            out[1][i] = inR;
+            continue;
+        }
+
+        float outL = inL;
+        float outR = inR;
+
+        switch (static_cast<Effect>(currentEffect))
+        {
+            case EFFECT_OVERDRIVE:
+            {
+                // pot0=drive (on DSP obj), pot1=tone blend, pot2=level
+                float driven = overdrive.Process(inL);
+                outL = driven * s.params[1] + inL * (1.f - s.params[1]);
+                outL *= s.params[2] * 2.f;
+                outR  = outL;
+                break;
+            }
+
+            case EFFECT_CHORUS:
+            {
+                // Chorus::Process is mono — process L and R separately
+                // pot2=dry/wet mix
+                float choL = chorus.Process(inL);
+                float choR = chorus.Process(inR);
+                outL = inL * (1.f - s.params[2]) + choL * s.params[2];
+                outR = inR * (1.f - s.params[2]) + choR * s.params[2];
+                break;
+            }
+
+            case EFFECT_REVERB:
+            {
+                // Reverb::Process is mono — pot2=wet level
+                reverb.Process(inL, inR, &outL, &outR);
+                outL = inL + outL * s.params[2];
+                outR = inR + outR * s.params[2];
+                break;
+            }
+
+            case EFFECT_PHASER:
+            {
+                // pot1=depth / wet mix
+                float phOut = phaser.Process(inL);
+                outL = inL * (1.f - s.params[1]) + phOut * s.params[1];
+                outR = outL;
+                break;
+            }
+        }
+
+        out[0][i] = outL;
+        out[1][i] = outR;
     }
+}
 
+// ──────────────────────────────────────────────
+// main
+// ──────────────────────────────────────────────
 
+int main()
+{
+    // ── System init ────────────────────────────
+    hw.Init();
+    hw.SetAudioBlockSize(48);
+    hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
 
+    // ── ADC init ──────────────────────────────
+    // Pass Pin objects directly — do NOT wrap in hw.GetPin()
+    AdcChannelConfig adcCfg[NUM_ADC];
+    adcCfg[ADC_POT0].InitSingle(POT0_PIN);
+    adcCfg[ADC_POT1].InitSingle(POT1_PIN);
+    adcCfg[ADC_POT2].InitSingle(POT2_PIN);
+    adcCfg[ADC_POT3].InitSingle(POT3_PIN);
+    hw.adc.Init(adcCfg, NUM_ADC);
+    hw.adc.Start();
 
-    float sample_rate = hardware.AudioSampleRate();
-    (void)sample_rate;
-    hardware.StartAudio(AudioPassthroughCallback);
+    // ── Switch init ───────────────────────────
+    // Switch::Init(Pin, debounce_ms, type, polarity)
+    // hw.GetPin(uint8_t) returns a Pin for digital GPIO pins
+    toggleEdit.Init(hw.GetPin(PIN_TOGGLE_EDIT),
+                    1000,
+                    Switch::TYPE_MOMENTARY,
+                    Switch::POLARITY_INVERTED);
 
-    // Loop forever
-    for(;;)
-    {        
-        control_state.potentiometer_one = hardware.adc.Get(POTENTIOMETER_PIN_ONE);
-        control_state.potentiometer_two = hardware.adc.Get(POTENTIOMETER_PIN_TWO);
-        control_state.potentiometer_three = hardware.adc.Get(POTENTIOMETER_PIN_THREE);
-        control_state.potentiometer_four = hardware.adc.Get(POTENTIOMETER_PIN_FOUR);
-        control_state.button_one = hardware.adc.Get(BUTTON_PIN_ONE);
-        control_state.button_two = hardware.adc.Get(BUTTON_PIN_TWO);
-        //i2c.TransmitBlocking(0x10, (uint8_t*)data, sizeof(data) / sizeof(data[0]), 1000);
+    togglePassthrough.Init(hw.GetPin(PIN_TOGGLE_PASSTHROUGH),
+                           1000,
+                           Switch::TYPE_MOMENTARY,
+                           Switch::POLARITY_INVERTED);
 
-        // Wait 500ms
-        System::Delay(500);
+    btnEffectCycle.Init(hw.GetPin(PIN_BTN_EFFECT_CYCLE),
+                        1000,
+                        Switch::TYPE_MOMENTARY,
+                        Switch::POLARITY_INVERTED);
+
+    // ── DSP init ──────────────────────────────
+    overdrive.Init();
+    overdrive.SetDrive(0.5f);
+
+    chorus.Init(SAMPLE_RATE);
+
+    reverb.Init(SAMPLE_RATE);
+    reverb.SetFeedback(0.6f);
+    reverb.SetLpFreq(9000.f);
+
+    phaser.Init(SAMPLE_RATE);
+
+    ApplyEffectState();
+
+    // ── Start audio ───────────────────────────
+    hw.StartAudio(AudioCallback);
+
+    // ── Main control loop (~1 kHz) ────────────
+    while (true)
+    {
+        toggleEdit.Debounce();
+        togglePassthrough.Debounce();
+        btnEffectCycle.Debounce();
+
+        // Bottom toggle: passthrough (reads live physical state)
+        passthrough = togglePassthrough.Pressed();
+
+        // Top toggle: editing gate
+        editingEnabled = toggleEdit.Pressed();
+
+        // Rising edge of editing gate: snapshot pot positions (pick-up behaviour)
+        if (editingEnabled && !prevEditing)
+            SyncPotBaseline();
+
+        prevEditing = editingEnabled;
+
+        // Push button: cycle effect preset
+        if (btnEffectCycle.RisingEdge())
+        {
+            currentEffect = (currentEffect + 1) % NUM_EFFECTS;
+            ApplyEffectState();
+            SyncPotBaseline();
+        }
+
+        // Pots → effect parameter state (only when editing, not bypassed)
+        if (editingEnabled && !passthrough)
+        {
+            bool changed = false;
+
+            for (int p = 0; p < NUM_POTS; p++)
+            {
+                float raw = ReadPot(p);
+
+                if (fabsf(raw - lastPotValue[p]) > ADC_DEADBAND)
+                {
+                    lastPotValue[p]                       = raw;
+                    effectStates[currentEffect].params[p] = raw;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+                ApplyEffectState();
+        }
+
+        System::Delay(1);
     }
 }
