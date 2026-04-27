@@ -32,15 +32,15 @@ using namespace daisysp;
 // ──────────────────────────────────────────────
 
 // Potentiometer wipers — passed directly to AdcChannelConfig::InitSingle
-static const Pin POT0_PIN = seed::A0;
-static const Pin POT1_PIN = seed::A1;
-static const Pin POT2_PIN = seed::A2;
-static const Pin POT3_PIN = seed::A3;
+static const Pin POT0_PIN = seed::A1;
+static const Pin POT1_PIN = seed::A3;
+static const Pin POT2_PIN = seed::A5;
+static const Pin POT3_PIN = seed::A7;
 
 // Digital switch pin indices (uint8_t) for hw.GetPin()
-static constexpr uint8_t PIN_TOGGLE_EDIT        = 0;   // D0 → top toggle
-static constexpr uint8_t PIN_TOGGLE_PASSTHROUGH = 1;   // D1 → bottom toggle
-static constexpr uint8_t PIN_BTN_EFFECT_CYCLE   = 2;   // D2 → push button
+static constexpr uint8_t PIN_TOGGLE_EDIT        = 1;   // D1 -> top toggle
+static constexpr uint8_t PIN_TOGGLE_PASSTHROUGH = 2;   // D2 -> bottom toggle
+static constexpr uint8_t PIN_BTN_EFFECT_CYCLE   = 3;   // D3 -> push button
 
 // ──────────────────────────────────────────────
 // ADC channel indices (must match Init order)
@@ -103,7 +103,7 @@ Phaser    phaser;
 // Runtime state
 // ──────────────────────────────────────────────
 
-uint8_t currentEffect  = EFFECT_OVERDRIVE;
+uint8_t currentEffect  = EFFECT_CHORUS;
 bool    passthrough    = false;
 bool    editingEnabled = false;
 bool    prevEditing    = false;
@@ -260,18 +260,18 @@ int main()
     // hw.GetPin(uint8_t) returns a Pin for digital GPIO pins
     toggleEdit.Init(hw.GetPin(PIN_TOGGLE_EDIT),
                     1000,
-                    Switch::TYPE_MOMENTARY,
-                    Switch::POLARITY_INVERTED);
+                    Switch::TYPE_TOGGLE,
+                    Switch::POLARITY_NORMAL);
 
     togglePassthrough.Init(hw.GetPin(PIN_TOGGLE_PASSTHROUGH),
                            1000,
-                           Switch::TYPE_MOMENTARY,
-                           Switch::POLARITY_INVERTED);
+                           Switch::TYPE_TOGGLE,
+                           Switch::POLARITY_NORMAL);
 
     btnEffectCycle.Init(hw.GetPin(PIN_BTN_EFFECT_CYCLE),
                         1000,
                         Switch::TYPE_MOMENTARY,
-                        Switch::POLARITY_INVERTED);
+                        Switch::POLARITY_NORMAL);
 
     // ── DSP init ──────────────────────────────
     overdrive.Init();
