@@ -774,7 +774,7 @@ int main()
         passthrough = togglePassthrough.Pressed();
 
         // Top toggle: editing gate
-        editingEnabled = toggleEdit.Pressed();
+        editingEnabled = true;
 
         // Rising edge of editing gate: snapshot pot positions (pick-up behaviour)
         if (editingEnabled && !prevEditing)
