@@ -95,15 +95,16 @@ static constexpr float EQ_GAIN_DB = 12.f;
 static constexpr float TWO_PI = 6.28318530717958647692f;
 
 // Lead preset (preset 3) tuning
-static constexpr float LEAD_BOOST_MAX = 5.f;
-static constexpr float LEAD_AMP_DRIVE = 0.4f;
+static constexpr float LEAD_BOOST_MAX = 2.f;     // pot0 max boost (~+6 dB); was 3.f / 5.f earlier
+static constexpr float LEAD_AMP_DRIVE = 0.2f;
 static constexpr float LEAD_CAB_FC = 5000.f;
 static constexpr float LEAD_CAB_Q = 0.7f;
 static constexpr float LEAD_DELAY_TIME_S = 0.4f;
 static constexpr float LEAD_DELAY_FB = 0.4f;
 static constexpr float LEAD_REVERB_FB = 0.7f;
 static constexpr float LEAD_REVERB_LP = 9000.f;
-static constexpr float NOISE_GATE_MAX_THRESH = 0.03f;
+static constexpr float LEAD_OUTPUT_TRIM = 0.6f;  // fixed post-chain attenuation (~ -4.4 dB)
+static constexpr float NOISE_GATE_MAX_THRESH = 0.02f;
 
 // Ambient preset (preset 2) tuning
 static constexpr float AMBIENT_DELAY_MIN_S = 0.1f;
@@ -116,13 +117,13 @@ static constexpr float AMBIENT_CHORUS_RATE = 0.6f;
 static constexpr float AMBIENT_CHORUS_DEPTH = 0.7f;
 
 // High-gain 808-style preset (preset 4) tuning
-static constexpr float HG808_GAIN_MAX = 10.f; // pot1 input boost ceiling (~+20 dB)
+static constexpr float HG808_GAIN_MAX = 5.f; // pot1 input boost ceiling (~+5 dB)
 static constexpr float HG808_HP_FC = 100.f;   // tighten lows before clipper
 static constexpr float HG808_HP_Q = 0.7f;
 static constexpr float HG808_PEAK_FC = 700.f; // TS-808 signature mid hump
 static constexpr float HG808_PEAK_Q = 1.0f;
 static constexpr float HG808_PEAK_GAIN_DB = 6.f;
-static constexpr float HG808_NOISE_MAX = 0.3f; // pot3 max noise injection level
+static constexpr float HG808_NOISE_MAX = 0.1f; // pot3 max noise injection level
 
 // ──────────────────────────────────────────────
 // Effect Parameter State
@@ -151,8 +152,8 @@ static EffectState effectStates[NUM_EFFECTS] = {
     {{0.5f, 0.5f, 0.5f, 0.5f}},  // EQ:   level=unity, bass/mid/treble flat (= bypass)
     {{0.7f, 0.5f, 0.25f, 0.5f}}, // Funk: deep wah, half-blend comp, subtle verb, unity gain
     {{0.6f, 0.5f, 0.4f, 0.5f}},  // Ambient: med-long delay, moderate verb, half chorus, unity gain
-    {{0.6f, 0.4f, 0.3f, 0.7f}},  // Lead
-    {{0.5f, 0.6f, 0.7f, 0.1f}},  // HiGain 808: unity vol, hot input, lots of drive, light dirt
+    {{0.3f, 0.4f, 0.3f, 0.7f}},  // Lead
+    {{0.3f, 0.3f, 0.3f, 0.05f}},  // HiGain 808: unity vol, hot input, lots of drive, light dirt
 };
 
 // ──────────────────────────────────────────────
@@ -625,7 +626,7 @@ void AudioCallback(AudioHandle::InputBuffer in,
             leadDelay.Write(reverbOut + wetDelay * LEAD_DELAY_FB);
             float delayOut = reverbOut * (1.f - wet_mix) + wetDelay * wet_mix;
 
-            float gated = noiseGate.Process(delayOut);
+            float gated = noiseGate.Process(delayOut) * LEAD_OUTPUT_TRIM;
             outL = gated;
             outR = gated;
             break;
