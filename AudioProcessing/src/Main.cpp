@@ -17,11 +17,14 @@
  *   1 – Chorus     (pot0=rate,  pot1=depth,    pot2=mix,      pot3=spare)
  *   2 – Reverb     (pot0=room,  pot1=damping,  pot2=wet,      pot3=spare)
  *   3 – Phaser     (pot0=rate,  pot1=depth,    pot2=feedback, pot3=spare)
+ *   4 - NeuralSeed (pot0=input, pot1=mix,      pot2=level,    pot3=reserved)
  */
 
 #include "daisy_seed.h"
 #include "daisysp.h"
 #include "Effects/reverbsc.h"
+#include "NeuralSeedModelData.h"
+#include <RTNeural/RTNeural.h>
 
 using namespace daisy;
 using namespace daisysp;
@@ -56,7 +59,7 @@ static constexpr int NUM_POTS = 4;
 // Constants
 // ──────────────────────────────────────────────
 
-static constexpr int   NUM_EFFECTS  = 4;
+static constexpr int   NUM_EFFECTS  = 5;
 static constexpr float SAMPLE_RATE  = 48000.f;
 static constexpr float ADC_DEADBAND = 0.005f;   // ~0.5% — suppresses pot noise
 
@@ -69,7 +72,8 @@ enum Effect : uint8_t
     EFFECT_OVERDRIVE = 0,
     EFFECT_CHORUS,
     EFFECT_REVERB,
-    EFFECT_PHASER
+    EFFECT_PHASER,
+    EFFECT_NEURALSEED
 };
 
 struct EffectState
@@ -82,6 +86,7 @@ static EffectState effectStates[NUM_EFFECTS] = {
     {{ 0.3f, 0.5f, 0.5f, 0.5f }},   // Chorus
     {{ 0.6f, 0.5f, 0.5f, 0.5f }},   // Reverb
     {{ 0.4f, 0.5f, 0.3f, 0.5f }},   // Phaser
+    {{ 0.33f, 1.0f, 0.5f, 0.5f }},  // NeuralSeed
 };
 
 // ──────────────────────────────────────────────
@@ -98,6 +103,10 @@ Overdrive overdrive;
 Chorus    chorus;
 ReverbSc    reverb;   // daisysp::Reverb (not ReverbSc)
 Phaser    phaser;
+
+RTNeural::ModelT<float, 1, 1,
+    RTNeural::GRULayerT<float, 1, 10>,
+    RTNeural::DenseT<float, 10, 1>> neuralModel;
 
 // ──────────────────────────────────────────────
 // Runtime state
@@ -131,6 +140,22 @@ void SyncPotBaseline()
         lastPotValue[i] = ReadPot(i);
 }
 
+void InitNeuralSeedModel()
+{
+    NeuralSeedModelData neuralData = CreateKlondc3SnapG5ModelData();
+
+    auto& gru   = neuralModel.get<0>();
+    auto& dense = neuralModel.get<1>();
+
+    gru.setWVals(neuralData.rec_weight_ih_l0);
+    gru.setUVals(neuralData.rec_weight_hh_l0);
+    gru.setBVals(neuralData.rec_bias);
+    dense.setWeights(neuralData.lin_weight);
+    dense.setBias(neuralData.lin_bias.data());
+
+    neuralModel.reset();
+}
+
 // ──────────────────────────────────────────────
 // Apply saved state → DSP objects
 // ──────────────────────────────────────────────
@@ -158,6 +183,9 @@ void ApplyEffectState()
         case EFFECT_PHASER:
             phaser.SetFreq(s.params[0] * 10.f);     // 0–10 Hz
             phaser.SetFeedback(s.params[2]);
+            break;
+
+        case EFFECT_NEURALSEED:
             break;
     }
 }
@@ -227,6 +255,16 @@ void AudioCallback(AudioHandle::InputBuffer  in,
                 outR = outL;
                 break;
             }
+
+            case EFFECT_NEURALSEED:
+            {
+                // pot0=input gain, pot1=dry/wet mix, pot2=output level
+                float neuralIn[1] = { inL * (s.params[0] * 3.f) };
+                float wet = neuralModel.forward(neuralIn) + inL;
+                outL = (inL * (1.f - s.params[1]) + wet * s.params[1]) * s.params[2];
+                outR = outL;
+                break;
+            }
         }
 
         out[0][i] = outL;
@@ -285,6 +323,8 @@ int main()
 
     phaser.Init(SAMPLE_RATE);
 
+    InitNeuralSeedModel();
+
     ApplyEffectState();
 
     // ── Start audio ───────────────────────────
@@ -314,6 +354,8 @@ int main()
         {
             currentEffect = (currentEffect + 1) % NUM_EFFECTS;
             ApplyEffectState();
+            if (currentEffect == EFFECT_NEURALSEED)
+                neuralModel.reset();
             SyncPotBaseline();
         }
 
