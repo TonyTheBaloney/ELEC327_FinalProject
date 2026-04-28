@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ELEC 327 — Custom Digital Guitar Pedal</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0e0e10;
+      --surface: #18181c;
+      --border:  #2a2a30;
+      --accent:  #7c6af7;
+      --accent2: #a78bfa;
+      --text:    #e8e8ec;
+      --muted:   #888898;
+      --radius:  10px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Animated canvas background ── */
+    #bg-canvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    nav, main, footer { position: relative; z-index: 1; }
+
+    /* ── Layout ── */
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+
+    section { padding: 80px 0; }
+
+    /* ── Fade-in ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade { animation: fadeUp 0.7s ease both; }
+    .fade-1 { animation-delay: 0.05s; }
+    .fade-2 { animation-delay: 0.15s; }
+    .fade-3 { animation-delay: 0.25s; }
+    .fade-4 { animation-delay: 0.35s; }
+    .fade-5 { animation-delay: 0.45s; }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(14, 14, 16, 0.8);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 0;
+    }
+
+    nav .inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nav-brand {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 13px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+    }
+    .nav-brand span { color: var(--accent2); }
+
+    nav ul { list-style: none; display: flex; gap: 28px; }
+    nav ul a { font-size: 13px; color: var(--muted); transition: color 0.2s; }
+    nav ul a:hover { color: var(--text); text-decoration: none; }
+
+    /* ── Hero ── */
+    #hero {
+      padding: 130px 0 110px;
+      text-align: center;
+    }
+
+    .hero-tag {
+      display: inline-block;
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent2);
+      background: rgba(124, 106, 247, 0.1);
+      border: 1px solid rgba(124, 106, 247, 0.25);
+      border-radius: 20px;
+      padding: 4px 14px;
+      margin-bottom: 28px;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin-bottom: 18px;
+    }
+
+    .hero-tagline {
+      font-size: clamp(1rem, 2.5vw, 1.15rem);
+      color: var(--muted);
+      max-width: 520px;
+      margin: 0 auto 40px;
+    }
+
+    .hero-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      padding: 11px 26px;
+      border-radius: 8px;
+      transition: background 0.2s, transform 0.15s;
+    }
+    .hero-cta:hover { background: var(--accent2); transform: translateY(-2px); text-decoration: none; }
+
+    /* ── Section headings ── */
+    .section-label {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent2);
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: clamp(1.4rem, 3vw, 1.9rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 14px;
+    }
+
+    .section-desc { color: var(--muted); max-width: 560px; margin-bottom: 48px; }
+
+    hr { border: none; border-top: 1px solid var(--border); }
+
+    /* ── Effect cards — forced 1×5 row ── */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 16px;
+      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+      cursor: default;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: var(--accent);
+      box-shadow: 0 8px 28px rgba(124, 106, 247, 0.12);
+    }
+
+    .card-icon { font-size: 26px; margin-bottom: 12px; display: block; }
+
+    .card h3 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .card p  { font-size: 12px; color: var(--muted); line-height: 1.5; flex: 1; }
+
+    /* NeuralSeed — primary highlight */
+    .card.ai {
+      border-color: var(--accent);
+      background: linear-gradient(160deg, #1c1928 0%, #18181c 60%);
+      box-shadow: 0 0 0 1px rgba(124,106,247,0.25), 0 0 32px rgba(124,106,247,0.08);
+      padding: 26px 18px;
+      position: relative;
+    }
+
+    .card.ai::before {
+      content: "PRIMARY";
+      position: absolute;
+      top: -1px; right: 12px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      color: var(--accent2);
+      background: rgba(124,106,247,0.15);
+      border: 1px solid rgba(124,106,247,0.3);
+      border-top: none;
+      border-radius: 0 0 6px 6px;
+      padding: 2px 8px;
+    }
+
+    .card.ai:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 0 0 1px var(--accent), 0 16px 48px rgba(124,106,247,0.22);
+    }
+
+    .card.ai h3 { color: var(--accent2); font-size: 15px; }
+
+    /* ── Spec strip ── */
+    #hardware { padding: 60px 0; }
+
+    .specs {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .spec { background: var(--surface); padding: 22px 20px; }
+
+    .spec-label {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .spec-value { font-size: 14px; font-weight: 600; color: var(--text); }
+
+    /* ── NeuralSeed section ── */
+    #neural { padding: 80px 0; }
+
+    .neural-box {
+      background: var(--surface);
+      border: 1px solid rgba(124,106,247,0.3);
+      border-radius: var(--radius);
+      padding: 40px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      align-items: center;
+    }
+
+    .neural-box h2 { margin-bottom: 12px; }
+    .neural-box p  { color: var(--muted); font-size: 15px; margin-bottom: 20px; }
+
+    .model-list { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+    .model-list li {
+      font-family: "SF Mono","Fira Code", monospace;
+      font-size: 11px;
+      color: var(--accent2);
+      background: rgba(124,106,247,0.1);
+      border: 1px solid rgba(124,106,247,0.2);
+      border-radius: 6px;
+      padding: 4px 10px;
+    }
+
+    .neural-visual { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+
+    .arch-box {
+      background: rgba(124,106,247,0.15);
+      border: 1px solid rgba(124,106,247,0.35);
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-family: "SF Mono","Fira Code", monospace;
+      font-size: 12px;
+      color: var(--accent2);
+      text-align: center;
+    }
+
+    .arch-arrow { color: var(--border); font-size: 18px; }
+
+    /* ── Build steps ── */
+    #build { padding: 80px 0; }
+
+    .steps {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      padding: 22px 28px;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    .step:last-child { border-bottom: none; }
+    .step:hover { background: rgba(255,255,255,0.02); }
+
+    .step-num {
+      font-family: "SF Mono","Fira Code", monospace;
+      font-size: 12px;
+      color: var(--accent2);
+      background: rgba(124,106,247,0.1);
+      border: 1px solid rgba(124,106,247,0.2);
+      border-radius: 6px;
+      padding: 2px 9px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .step-content strong { display: block; font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .step-content p { font-size: 13px; color: var(--muted); }
+
+    code {
+      font-family: "SF Mono","Fira Code", monospace;
+      font-size: 12px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      color: var(--text);
+    }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 0;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--text); }
+
+    /* ── Mobile ── */
+    @media (max-width: 800px) {
+      .cards { grid-template-columns: 1fr 1fr; }
+      .neural-box { grid-template-columns: 1fr; }
+      .neural-visual { display: none; }
+      nav ul { display: none; }
+    }
+    @media (max-width: 480px) {
+      .cards { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Animated waveform background -->
+  <canvas id="bg-canvas"></canvas>
+
+  <!-- Nav -->
+  <nav>
+    <div class="inner">
+      <span class="nav-brand">ELEC&nbsp;327 &mdash; <span>Digital Pedal</span></span>
+      <ul>
+        <li><a href="#effects">Effects</a></li>
+        <li><a href="#neural">NeuralSeed</a></li>
+        <li><a href="#build">Build</a></li>
+        <li><a href="https://github.com/TonyTheBaloney/ELEC327_FinalProject/tree/neuralseed-test">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+    <!-- Hero -->
+    <section id="hero">
+      <div class="container">
+        <div class="hero-tag fade fade-1">Rice University &middot; ELEC 327</div>
+        <h1 class="fade fade-2">Five effects.<br>One pedal.<br>One neural net.</h1>
+        <p class="hero-tagline fade fade-3">
+          A real-time guitar effects processor running on the Daisy Seed — combining
+          classic DSP with on-device neural amp simulation.
+        </p>
+        <a class="hero-cta fade fade-4" href="https://github.com/TonyTheBaloney/ELEC327_FinalProject/tree/neuralseed-test">
+          View on GitHub &rarr;
+        </a>
+      </div>
+    </section>
+
+    <hr />
+
+    <!-- Effects -->
+    <section id="effects">
+      <div class="container">
+        <p class="section-label fade fade-1">Audio Effects</p>
+        <h2 class="fade fade-2">Five presets, one button</h2>
+        <p class="section-desc fade fade-3">
+          Cycle through effects with a single button press. Each preset stores its
+          own knob state independently — switch freely without losing your settings.
+        </p>
+        <div class="cards">
+          <div class="card fade fade-1">
+            <span class="card-icon">&#127928;</span>
+            <h3>Overdrive</h3>
+            <p>Drive, tone, and level control for warm analog-style clipping.</p>
+          </div>
+          <div class="card fade fade-2">
+            <span class="card-icon">&#10024;</span>
+            <h3>Chorus</h3>
+            <p>Rate, delay, and mix for lush modulation and shimmer.</p>
+          </div>
+          <div class="card fade fade-3">
+            <span class="card-icon">&#127968;</span>
+            <h3>Reverb</h3>
+            <p>Room size, damping up to 18&nbsp;kHz, and wet level.</p>
+          </div>
+          <div class="card fade fade-4">
+            <span class="card-icon">&#127751;</span>
+            <h3>Phaser</h3>
+            <p>Sweep rate, depth, and feedback for classic phase shifting.</p>
+          </div>
+          <div class="card ai fade fade-5">
+            <span class="card-icon">&#129302;</span>
+            <h3>NeuralSeed</h3>
+            <p>GRU10 neural amp/pedal capture. Input gain, dry/wet, output level.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr />
+
+    <!-- Hardware -->
+    <section id="hardware">
+      <div class="container">
+        <p class="section-label fade fade-1">Hardware</p>
+        <h2 class="fade fade-2">Built on Daisy Seed</h2>
+        <p class="section-desc fade fade-3">
+          The Daisy Seed packs a 480&nbsp;MHz Cortex-M7 with a hardware FPU — enough
+          headroom to run neural inference alongside real-time DSP at CD quality.
+        </p>
+        <div class="specs fade fade-4">
+          <div class="spec"><div class="spec-label">MCU</div><div class="spec-value">STM32H750IB</div></div>
+          <div class="spec"><div class="spec-label">Core</div><div class="spec-value">Cortex-M7 @ 480&nbsp;MHz</div></div>
+          <div class="spec"><div class="spec-label">Sample Rate</div><div class="spec-value">48&nbsp;kHz</div></div>
+          <div class="spec"><div class="spec-label">Block Size</div><div class="spec-value">48 samples</div></div>
+          <div class="spec"><div class="spec-label">Analog Inputs</div><div class="spec-value">4 Potentiometers</div></div>
+          <div class="spec"><div class="spec-label">Controls</div><div class="spec-value">2 Toggles &amp; 1 Button</div></div>
+          <div class="spec"><div class="spec-label">Flashing</div><div class="spec-value">USB DFU</div></div>
+          <div class="spec"><div class="spec-label">Debugging</div><div class="spec-value">OpenOCD / GDB</div></div>
+        </div>
+      </div>
+    </section>
+
+    <hr />
+
+    <!-- NeuralSeed -->
+    <section id="neural">
+      <div class="container">
+        <div class="neural-box fade fade-1">
+          <div>
+            <p class="section-label">NeuralSeed</p>
+            <h2>Neural amp simulation<br>on bare metal</h2>
+            <p>
+              A GRU10 model captured from real hardware — Klon, TS9, Marshall, and
+              more — runs entirely on the Cortex-M7 using <strong>RTNeural</strong>,
+              a zero-overhead header-only inference engine. Model weights are compiled
+              directly into the firmware binary.
+            </p>
+            <ul class="model-list">
+              <li>Klon Centaur</li>
+              <li>TS9 Drive</li>
+              <li>ENGL G25</li>
+              <li>5150</li>
+              <li>Fender '57</li>
+              <li>Dirty Shirley</li>
+              <li>Orange Bass</li>
+              <li>Bassman</li>
+            </ul>
+          </div>
+          <div class="neural-visual">
+            <div class="arch-box">Audio In<br><small style="color:var(--muted)">1 sample · 48 kHz</small></div>
+            <div class="arch-arrow">&#8595;</div>
+            <div class="arch-box">GRU Layer<br><small style="color:var(--muted)">1 &rarr; 10 hidden</small></div>
+            <div class="arch-arrow">&#8595;</div>
+            <div class="arch-box">Dense Layer<br><small style="color:var(--muted)">10 &rarr; 1</small></div>
+            <div class="arch-arrow">&#8595;</div>
+            <div class="arch-box">Audio Out<br><small style="color:var(--muted)">1 sample</small></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr />
+
+    <!-- Build -->
+    <section id="build">
+      <div class="container">
+        <p class="section-label fade fade-1">Getting Started</p>
+        <h2 class="fade fade-2">Build &amp; flash</h2>
+        <p class="section-desc fade fade-3">
+          Uses a reproducible Nix dev shell — no manual toolchain installation required.
+        </p>
+        <div class="steps fade fade-4">
+          <div class="step">
+            <span class="step-num">01</span>
+            <div class="step-content">
+              <strong>Clone the repository</strong>
+              <p><code>git clone https://github.com/TonyTheBaloney/ELEC327_FinalProject</code></p>
+            </div>
+          </div>
+          <div class="step">
+            <span class="step-num">02</span>
+            <div class="step-content">
+              <strong>Pull submodules</strong>
+              <p><code>git submodule update --init --recursive</code> — fetches libDaisy, DaisySP, and RTNeural.</p>
+            </div>
+          </div>
+          <div class="step">
+            <span class="step-num">03</span>
+            <div class="step-content">
+              <strong>Enter the Nix dev shell</strong>
+              <p>From <code>AudioProcessing/</code>: <code>nix develop --extra-experimental-features "nix-command flakes"</code></p>
+            </div>
+          </div>
+          <div class="step">
+            <span class="step-num">04</span>
+            <div class="step-content">
+              <strong>Build libraries &amp; firmware</strong>
+              <p><code>make -C libDaisy &amp;&amp; make -C DaisySP &amp;&amp; make</code></p>
+            </div>
+          </div>
+          <div class="step">
+            <span class="step-num">05</span>
+            <div class="step-content">
+              <strong>Flash to Daisy Seed</strong>
+              <p>Put the board in DFU mode, then <code>make program-dfu</code>.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <p>
+        Rice University &middot; ELEC 327 &middot;
+        <a href="https://github.com/TonyTheBaloney/ELEC327_FinalProject/tree/neuralseed-test">GitHub</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    /* ── Oscilloscope waveform background ── */
+    const canvas = document.getElementById('bg-canvas');
+    const ctx = canvas.getContext('2d');
+    let W, H, t = 0;
+
+    function resize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    /* Define layered sine waves — each with its own amplitude, frequency,
+       phase speed, vertical centre offset, and opacity */
+    const waves = [
+      { amp: 42,  freq: 1.6,  speed: 0.28,  yFrac: 0.38, alpha: 0.18, width: 1.5 },
+      { amp: 22,  freq: 3.1,  speed: 0.44,  yFrac: 0.42, alpha: 0.10, width: 1.0 },
+      { amp: 60,  freq: 0.9,  speed: 0.18,  yFrac: 0.55, alpha: 0.07, width: 2.0 },
+      { amp: 18,  freq: 4.8,  speed: 0.62,  yFrac: 0.50, alpha: 0.08, width: 0.8 },
+      { amp: 34,  freq: 2.3,  speed: 0.35,  yFrac: 0.62, alpha: 0.12, width: 1.2 },
+      /* faint wide pulse across top */
+      { amp: 80,  freq: 0.5,  speed: 0.10,  yFrac: 0.20, alpha: 0.04, width: 2.5 },
+    ];
+
+    function drawWave(w) {
+      ctx.beginPath();
+      const y0 = H * w.yFrac;
+      const step = 3;
+      for (let x = 0; x <= W; x += step) {
+        const phase = (x / W) * Math.PI * 2 * w.freq + t * w.speed;
+        const y = y0 + Math.sin(phase) * w.amp;
+        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = `rgba(124, 106, 247, ${w.alpha})`;
+      ctx.lineWidth   = w.width;
+      ctx.stroke();
+    }
+
+    /* Subtle scanline grid */
+    function drawGrid() {
+      ctx.strokeStyle = 'rgba(42, 42, 48, 0.6)';
+      ctx.lineWidth   = 1;
+      const spacing = 80;
+      for (let x = 0; x < W; x += spacing) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      }
+      for (let y = 0; y < H; y += spacing) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+    }
+
+    function frame() {
+      ctx.clearRect(0, 0, W, H);
+      drawGrid();
+      waves.forEach(drawWave);
+      t += 0.016;
+      requestAnimationFrame(frame);
+    }
+    frame();
+  </script>
+
+</body>
+</html>
