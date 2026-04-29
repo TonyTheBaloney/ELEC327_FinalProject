@@ -13,39 +13,11 @@
  *   Other end→ GND
  *
  * Effect Presets (cycled by push button):
- *   0 – EQ         (pot0=level, pot1=bass(200 Hz), pot2=mid(800 Hz), pot3=treble(4 kHz))
- *                  Each tone band is +/-12 dB; centered knobs => flat (true bypass).
- *   1 – Funk       Compressor -> AutoWah -> AMP -> Reverb chain.
- *                  pot0 = output volume (0..2x linear, 0.5 = unity)
- *                  pot1 = wah swing depth (envelope-driven cutoff motion)
- *                  pot2 = compressor parallel mix (0=dry, 1=fully compressed)
- *                  pot3 = reverb wet/dry mix
- *   2 – Ambient    Chorus -> Delay -> Reverb dreamy chain.
- *                  pot0 = output volume (0..2x linear, 0.5 = unity)
- *                  pot1 = delay length (100..800 ms, linear)
- *                  pot2 = reverb strength (additive wet 0..1)
- *                  pot3 = chorus mix (wet/dry crossfade 0..1)
- * //   2 – Reverb     (pot0=room,  pot1=damping,  pot2=wet,      pot3=spare)
- *   3 – Lead       Boost -> Distortion -> AMP -> CAB(LP@5kHz) -> Reverb -> Delay -> NoiseGate.
- *                  pot0 = output volume (0..2x linear, 0.5 = unity)
- *                  pot1 = gain (combined: pre-boost AND distortion drive sweep together)
- *                  pot2 = reverb + delay depth (shared wet/dry crossfade)
- *                  pot3 = noise gate threshold (0=open, 1 ~ -30 dB amplitude)
- *   4 – HiGain     808-style: gain -> HP@100Hz -> mid-hump@700Hz -> drive -> volume.
- *                  pot0 = output volume (0..2x linear)
- *                  pot1 = gain (input boost, 1..HG808_GAIN_MAX)
- *                  pot2 = distortion drive (0..1, soft-clip intensity)
- *                  pot3 = tone (mid hump 0..+6 dB at 700 Hz)
- *
- * // Earlier preset 0 versions:
- * //   Bypass     (pot0=level, pots 1-3=unused)
- * //   Overdrive  (pot0=drive, pot1=tone,     pot2=level,    pot3=spare)
- * // Earlier preset 1:
- * //   Chorus     (pot0=rate,  pot1=depth,    pot2=mix,      pot3=spare)
- * // Earlier preset 2:
- * //   Reverb     (pot0=room,  pot1=damping,  pot2=wet,      pot3=spare)
- * // Earlier preset 3:
- * //   Phaser     (pot0=rate,  pot1=depth,    pot2=feedback, pot3=spare)
+ *   0 – Overdrive  (pot0=drive, pot1=tone,     pot2=level,    pot3=spare)
+ *   1 – Chorus     (pot0=rate,  pot1=depth,    pot2=mix,      pot3=spare)
+ *   2 – Reverb     (pot0=room,  pot1=damping,  pot2=wet,      pot3=spare)
+ *   3 – Phaser     (pot0=rate,  pot1=depth,    pot2=feedback, pot3=spare)
+ *   4 - NeuralSeed (pot0=input, pot1=mix,      pot2=level,    pot3=reserved)
  */
 
 #include "daisy_seed.h"
@@ -53,6 +25,8 @@
 #include "Effects/reverbsc.h"
 #include "Dynamics/compressor.h"
 #include <math.h>
+#include "NeuralSeedModelData.h"
+#include <RTNeural/RTNeural.h>
 
 using namespace daisy;
 using namespace daisysp;
@@ -145,7 +119,8 @@ enum Effect : uint8_t
     // EFFECT_REVERB,         // earlier preset 2 (simple knob-set reverb)
     EFFECT_LEAD,
     // EFFECT_PHASER          // earlier preset 3
-    EFFECT_HIGAIN // High-gain 808-style: gain -> HP -> mid hump -> +noise -> drive -> volume
+    EFFECT_HIGAIN, // High-gain 808-style: gain -> HP -> mid hump -> +noise -> drive -> volume
+    EFFECT_NEURALSEED
 };
 
 struct EffectState
@@ -353,6 +328,10 @@ Overdrive hg808Drive; // saturation stage
 //     return (float)((int32_t)(lcg & 0x00FFFFFFu) - 0x00800000) * (1.f / 0x00800000);
 // }
 
+RTNeural::ModelT<float, 1, 1,
+    RTNeural::GRULayerT<float, 1, 10>,
+    RTNeural::DenseT<float, 10, 1>> neuralModel;
+
 // ──────────────────────────────────────────────
 // Runtime state
 // ──────────────────────────────────────────────
@@ -383,6 +362,22 @@ void SyncPotBaseline()
 {
     for (int i = 0; i < NUM_POTS; i++)
         lastPotValue[i] = ReadPot(i);
+}
+
+void InitNeuralSeedModel()
+{
+    NeuralSeedModelData neuralData = CreateSelectedNeuralSeedModelData();
+
+    auto& gru   = neuralModel.get<0>();
+    auto& dense = neuralModel.get<1>();
+
+    gru.setWVals(neuralData.rec_weight_ih_l0);
+    gru.setUVals(neuralData.rec_weight_hh_l0);
+    gru.setBVals(neuralData.rec_bias);
+    dense.setWeights(neuralData.lin_weight);
+    dense.setBias(neuralData.lin_bias.data());
+
+    neuralModel.reset();
 }
 
 // ──────────────────────────────────────────────
@@ -464,6 +459,8 @@ void ApplyEffectState()
         hg808Peak.SetPeak(SAMPLE_RATE, HG808_PEAK_FC, HG808_PEAK_Q,
                           s.params[3] * HG808_PEAK_GAIN_DB);                               // pot3 = tone (mid hump)
         break;
+    case EFFECT_NEURALSEED:
+            break;
     }
 }
 
@@ -660,6 +657,15 @@ void AudioCallback(AudioHandle::InputBuffer in,
             outR = x;
             break;
         }
+        case EFFECT_NEURALSEED:
+        {
+                // pot0=input gain, pot1=dry/wet mix, pot2=output level
+                float gainedIn = inL * (s.params[0] * 3.f);
+                float neuralIn[1] = { gainedIn };
+                float wet = neuralModel.forward(neuralIn) + gainedIn;
+                outL = (inL * (1.f - s.params[1]) + wet * s.params[1]) * s.params[2];
+                outR = outL;
+                break;
         }
 
         out[0][i] = outL;
@@ -765,6 +771,9 @@ int main()
     hg808Peak.Reset();
     hg808Drive.Init();
     hg808Drive.SetDrive(0.5f);
+
+    InitNeuralSeedModel();
+
     ApplyEffectState();
 
     // ── Start audio ───────────────────────────
@@ -794,6 +803,8 @@ int main()
         {
             currentEffect = (currentEffect + 1) % NUM_EFFECTS;
             ApplyEffectState();
+            if (currentEffect == EFFECT_NEURALSEED)
+                neuralModel.reset();
             SyncPotBaseline();
         }
 
