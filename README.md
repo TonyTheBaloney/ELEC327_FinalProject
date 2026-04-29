@@ -61,6 +61,20 @@ To verify preprocessing/training without replacing the compiled model header:
 ./tools/neuralseed/train_neuralseed.sh distortion --epochs 1 --validation-frequency 1 --no-export
 ```
 
+To keep training running after disconnecting from SSH, use the nohup launcher:
+
+```bash
+./tools/neuralseed/train_neuralseed_nohup.sh distortion --fresh --epochs 300 --gpu 3
+./tools/neuralseed/train_neuralseed_nohup.sh chorus --fresh --epochs 300 --gpu 3
+```
+
+The nohup launcher writes logs and PID files under `training/neuralseed/logs/`,
+which is ignored by git. Follow the latest log for an effect with:
+
+```bash
+./tools/neuralseed/tail_neuralseed_log.sh distortion
+```
+
 The commit-friendly checkpoints are saved here:
 
 ```text
