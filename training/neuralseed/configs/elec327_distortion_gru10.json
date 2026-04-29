@@ -1,0 +1,14 @@
+{
+  "hidden_size": 10,
+  "unit_type": "GRU",
+  "input_size": 1,
+  "output_size": 1,
+  "skip_con": 1,
+  "loss_fcns": {
+    "ESR": 0.75,
+    "DC": 0.25
+  },
+  "pre_filt": "None",
+  "device": "elec327_distortion",
+  "file_name": "elec327_distortion"
+}

@@ -1,3 +1,11 @@
 build/
+__pycache__/
 DaisySP/
 libDaisy/
+data/
+.codex
+training/neuralseed/data/
+training/neuralseed/tensorboard/
+training/neuralseed/logs/
+training/neuralseed/results/**/*.wav
+training/neuralseed/results/**/maxmemusage.txt
