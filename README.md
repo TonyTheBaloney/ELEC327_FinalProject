@@ -14,3 +14,8 @@ nix develop --extra-experimental-features nix-command --extra-experimental-featu
 
 Check this link for help: https://gemini.google.com/share/752ff1b4bd42
 
+## MSPM0 LCD display firmware
+
+The MSPM0-side receiver/display code is in `MSMP0Processing`. It listens for
+the Daisy Seed's 5-byte I2C payload at address `0x42` and drives a 16x2 I2C LCD
+with the current effect mode and potentiometer percentages.

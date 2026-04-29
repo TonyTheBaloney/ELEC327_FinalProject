@@ -1,3 +1,11 @@
+/*
+ * Legacy formatting sketch kept for reference.
+ *
+ * The runnable MSPM0 firmware is in src/main.c. It receives the Daisy I2C
+ * frame on MSPM0 I2C1 and writes the formatted effect/pot data to the LCD on
+ * MSPM0 I2C0.
+ */
+
 #include <stdint.h>
 #include <stdio.h>
 
