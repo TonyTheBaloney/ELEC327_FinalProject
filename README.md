@@ -94,14 +94,20 @@ checkpoint is compiled into `AudioProcessing/src/NeuralSeedModelData.h`, then
 loaded by `AudioProcessing/src/Main.cpp` during startup. To change checkpoints,
 replace the embedded weights, rebuild the firmware, and flash the board again.
 
-For the current firmware shape, use a built-in GRU10 model from the NeuralSeed
-repo's `NeuralSeed/all_model_data.h`. These are compatible drop-in choices:
+The provided NeuralSeed model data is bundled in this repo at
+`training/neuralseed/provided/all_model_data.h`. List the bundled models with:
+
+```bash
+./tools/neuralseed/select_provided_model.py --list
+```
+
+The current firmware is compiled for a single-input GRU10 model
+(`RTNeural::GRULayerT<float, 1, 10>`). These bundled models match that native
+firmware shape:
 
 ```text
 1  engl_g25_p0056_GRU10
-2  klondc3_is2_gKnob_p024
 5  klondc3_snap_g5_p005
-6  ts9_driveKnob_p0057
 7  5150_g25_p012
 8  dirtyShirleyMini_clean_p017
 9  orangebass_G3_p046
@@ -109,65 +115,16 @@ repo's `NeuralSeed/all_model_data.h`. These are compatible drop-in choices:
 11 fender57_g5_p008
 ```
 
-From the `ELEC327_FinalProject` repo root, set `MODEL_NUM` to the model number
-you want, then run this helper script. Example: `MODEL_NUM=6` selects the TS9
-checkpoint.
+Models `2` and `6` are also GRU10 models, but they were trained with
+`input_size: 2`. The selector can export them, but the current firmware only
+feeds the first input unless `src/Main.cpp` is changed to pass a learned control
+input.
+
+From the `ELEC327_FinalProject` repo root, select a bundled model by number or
+exact name. Example: select the Klon snap model:
 
 ```bash
-MODEL_NUM=6
-
-python3 - "$MODEL_NUM" <<'PY'
-from pathlib import Path
-import sys
-
-num = sys.argv[1]
-source_path = Path("/home/harvey/NeuralSeedTraining/NeuralSeed/NeuralSeed/all_model_data.h")
-dest_path = Path("AudioProcessing/src/NeuralSeedModelData.h")
-main_path = Path("AudioProcessing/src/Main.cpp")
-
-source = source_path.read_text()
-needle = f"Model{num}.rec_weight_ih_l0"
-idx = source.index(needle)
-start = source.rfind("//========================================================================", 0, idx)
-rec_bias = source.index(f"Model{num}.rec_bias", idx)
-end = source.index("};", rec_bias) + 2
-
-block = source[start:end].replace(f"Model{num}.", "model.")
-name = block.splitlines()[1].replace("//", "").strip()
-
-header = f"""#pragma once
-
-#include <vector>
-
-struct NeuralSeedModelData
-{{
-    std::vector<std::vector<float>> rec_weight_ih_l0;
-    std::vector<std::vector<float>> rec_weight_hh_l0;
-    std::vector<std::vector<float>> lin_weight;
-    std::vector<float> lin_bias;
-    std::vector<std::vector<float>> rec_bias;
-}};
-
-static NeuralSeedModelData CreateSelectedNeuralSeedModelData()
-{{
-    NeuralSeedModelData model;
-    // Selected checkpoint: {name}
-
-{block}
-
-    return model;
-}}
-"""
-
-dest_path.write_text(header)
-
-main = main_path.read_text()
-for old_name in ("CreateKlondc3SnapG5ModelData", "CreateSelectedNeuralSeedModelData"):
-    main = main.replace(old_name, "CreateSelectedNeuralSeedModelData")
-main_path.write_text(main)
-
-print(f"Selected Model{num}: {name}")
-PY
+./tools/neuralseed/select_provided_model.py 5
 ```
 
 Then rebuild and flash:
@@ -183,9 +140,3 @@ make program-dfu
 GRU8, GRU7, GRU4, or LSTM checkpoints are not drop-in replacements for this
 firmware. Those require changing the RTNeural model type and weight-loading
 code in `src/Main.cpp`.
-
-
-nix develop --extra-experimental-features nix-command --extra-experimental-features flakes
-
-
-Check this link for help: https://gemini.google.com/share/752ff1b4bd42
