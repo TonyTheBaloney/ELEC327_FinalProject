@@ -161,12 +161,24 @@ static EffectState effectStates[NUM_EFFECTS] = {
     {{0.3f, 0.4f, 0.5f, 0.7f}},   // HiGain 808: 0.6x vol, mod gain, mid drive, full mid-hump tone
 };
 
+
+struct __attribute__((packed)) PedalData {
+    uint8_t effectID; // 0 = EQ, 1 = Funk, 2 = Ambient, 3 = Lead, 4 = HiGain
+    uint8_t pot0;     // 0-255
+    uint8_t pot1;     // 0-255
+    uint8_t pot2;     // 0-255
+    uint8_t pot3;     // 0-255
+};
+
+
 // ──────────────────────────────────────────────
 // Global hardware & DSP objects
 // ──────────────────────────────────────────────
 
 DaisySeed hw;
-
+I2CHandle i2c;
+//  I2C address of MSMP0 
+const uint8_t MSMP0_I2C_ADDRESS = 0x42;
 Switch toggleEdit;
 Switch togglePassthrough;
 Switch btnEffectCycle;
@@ -666,6 +678,18 @@ void AudioCallback(AudioHandle::InputBuffer in,
         out[1][i] = outR;
     }
 }
+void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3) {
+    PedalData data;
+    data.effectID = effect;
+    // Convert 0.0 - 1.0 float values to 0 - 255 integer values
+    data.pot0 = (uint8_t)(p0 * 255.0f);
+    data.pot1 = (uint8_t)(p1 * 255.0f);
+    data.pot2 = (uint8_t)(p2 * 255.0f);
+    data.pot3 = (uint8_t)(p3 * 255.0f);
+
+    // Transmit the 5-byte package
+    i2c.TransmitBlocking(MSMP0_I2C_ADDRESS, (uint8_t*)&data, sizeof(PedalData), 100);
+}
 
 // ──────────────────────────────────────────────
 // main
@@ -673,6 +697,16 @@ void AudioCallback(AudioHandle::InputBuffer in,
 
 int main()
 {
+    
+    I2CHandle::Config i2c_conf;
+    i2c_conf.periph         = I2CHandle::Config::Peripheral::I2C_1;
+    i2c_conf.mode           = I2CHandle::Config::Mode::I2C_MASTER;
+    i2c_conf.speed          = I2CHandle::Config::Speed::I2C_400KHZ;
+    i2c_conf.pin_config.scl = daisy::seed::D11; 
+    i2c_conf.pin_config.sda = daisy::seed::D12;
+    i2c.Init(i2c_conf);
+
+
     // ── System init ────────────────────────────
     hw.Init();
     hw.SetAudioBlockSize(48);
@@ -795,6 +829,13 @@ int main()
             currentEffect = (currentEffect + 1) % NUM_EFFECTS;
             ApplyEffectState();
             SyncPotBaseline();
+            
+            // SEND TO LCD: Preset changed
+            SendDataToMSMP0(currentEffect, 
+                            effectStates[currentEffect].params[0],
+                            effectStates[currentEffect].params[1],
+                            effectStates[currentEffect].params[2],
+                            effectStates[currentEffect].params[3]);
         }
 
         // Pots → effect parameter state (only when editing, not bypassed)
@@ -815,7 +856,16 @@ int main()
             }
 
             if (changed)
-                ApplyEffectState();
-        }
+                {ApplyEffectState();
+
+                SendDataToMSMP0(currentEffect, 
+                            effectStates[currentEffect].params[0],
+                            effectStates[currentEffect].params[1],
+                            effectStates[currentEffect].params[2],
+                            effectStates[currentEffect].params[3]);
+                
+        }   
+        
     }
+}
 }
