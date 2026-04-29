@@ -697,20 +697,19 @@ void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3) {
 
 int main()
 {
-    
-    I2CHandle::Config i2c_conf;
-    i2c_conf.periph         = I2CHandle::Config::Peripheral::I2C_1;
-    i2c_conf.mode           = I2CHandle::Config::Mode::I2C_MASTER;
-    i2c_conf.speed          = I2CHandle::Config::Speed::I2C_400KHZ;
-    i2c_conf.pin_config.scl = daisy::seed::D11; 
-    i2c_conf.pin_config.sda = daisy::seed::D12;
-    i2c.Init(i2c_conf);
-
-
     // ── System init ────────────────────────────
     hw.Init();
     hw.SetAudioBlockSize(48);
     hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
+
+    // ── I2C init (must be after hw.Init so clocks/GPIO are up) ──
+    I2CHandle::Config i2c_conf;
+    i2c_conf.periph         = I2CHandle::Config::Peripheral::I2C_1;
+    i2c_conf.mode           = I2CHandle::Config::Mode::I2C_MASTER;
+    i2c_conf.speed          = I2CHandle::Config::Speed::I2C_400KHZ;
+    i2c_conf.pin_config.scl = daisy::seed::D11;
+    i2c_conf.pin_config.sda = daisy::seed::D12;
+    i2c.Init(i2c_conf);
 
     // ── ADC init ──────────────────────────────
     // Pass Pin objects directly — do NOT wrap in hw.GetPin()
@@ -800,6 +799,13 @@ int main()
     hg808Drive.Init();
     hg808Drive.SetDrive(0.5f);
     ApplyEffectState();
+
+    // Broadcast boot-time state so the LCD comes up in sync.
+    SendDataToMSMP0(currentEffect,
+                    effectStates[currentEffect].params[0],
+                    effectStates[currentEffect].params[1],
+                    effectStates[currentEffect].params[2],
+                    effectStates[currentEffect].params[3]);
 
     // ── Start audio ───────────────────────────
     hw.StartAudio(AudioCallback);
