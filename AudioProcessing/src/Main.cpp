@@ -142,7 +142,7 @@ void SyncPotBaseline()
 
 void InitNeuralSeedModel()
 {
-    NeuralSeedModelData neuralData = CreateKlondc3SnapG5ModelData();
+    NeuralSeedModelData neuralData = CreateSelectedNeuralSeedModelData();
 
     auto& gru   = neuralModel.get<0>();
     auto& dense = neuralModel.get<1>();
@@ -259,8 +259,9 @@ void AudioCallback(AudioHandle::InputBuffer  in,
             case EFFECT_NEURALSEED:
             {
                 // pot0=input gain, pot1=dry/wet mix, pot2=output level
-                float neuralIn[1] = { inL * (s.params[0] * 3.f) };
-                float wet = neuralModel.forward(neuralIn) + inL;
+                float gainedIn = inL * (s.params[0] * 3.f);
+                float neuralIn[1] = { gainedIn };
+                float wet = neuralModel.forward(neuralIn) + gainedIn;
                 outL = (inL * (1.f - s.params[1]) + wet * s.params[1]) * s.params[2];
                 outR = outL;
                 break;

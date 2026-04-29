@@ -26,6 +26,53 @@ NeuralSeed controls:
 - Pot A5 controls NeuralSeed output level.
 - Pot A7 is reserved for a future trained model parameter or tone control.
 
+Local NeuralSeed training:
+
+The NeuralSeed source checkout lives outside this firmware repo at
+`/home/harvey/NeuralSeedTraining`, but training artifacts are written inside
+this repo under `training/neuralseed/`. The wrapper scripts use the
+`neuralseed-train` conda environment, preprocess `data/di.wav` against the
+target WAV, train a NeuralSeed-compatible GRU10 model, save checkpoints in the
+repo, and export the selected `model_best.json` into
+`AudioProcessing/src/NeuralSeedModelData.h`.
+
+```bash
+# Distortion/overdrive-style capture; this is the recommended NeuralSeed target.
+./tools/neuralseed/train_neuralseed.sh distortion
+
+# Chorus will run, but it is experimental because NeuralSeed is not designed for
+# time-based/modulated effects.
+./tools/neuralseed/train_neuralseed.sh chorus
+```
+
+By default the wrapper trains on GPU index `3` with
+`CUDA_DEVICE_ORDER=PCI_BUS_ID`. On this machine, index `3` maps to an A100.
+Override the device or epoch count with either `GPU_ID` or `--gpu`:
+
+```bash
+GPU_ID=3 ./tools/neuralseed/train_neuralseed.sh distortion --fresh --epochs 2000
+GPU_ID=2 ./tools/neuralseed/train_neuralseed.sh distortion --fresh --epochs 2000
+./tools/neuralseed/train_neuralseed.sh distortion --fresh --epochs 2000 --gpu 1
+```
+
+To verify preprocessing/training without replacing the compiled model header:
+
+```bash
+./tools/neuralseed/train_neuralseed.sh distortion --epochs 1 --validation-frequency 1 --no-export
+```
+
+The commit-friendly checkpoints are saved here:
+
+```text
+training/neuralseed/results/elec327_distortion-elec327_distortion_gru10/model_best.json
+training/neuralseed/results/elec327_distortion-elec327_distortion_gru10/model.json
+training/neuralseed/results/elec327_chorus-elec327_chorus_gru10/model_best.json
+training/neuralseed/results/elec327_chorus-elec327_chorus_gru10/model.json
+```
+
+The generated split WAVs, TensorBoard event files, and test output WAVs are
+ignored by git. Override the artifact root with `--artifact-root` if needed.
+
 Changing the NeuralSeed checkpoint:
 
 The board does not load NeuralSeed checkpoints dynamically. The selected
@@ -60,7 +107,7 @@ from pathlib import Path
 import sys
 
 num = sys.argv[1]
-source_path = Path("../NeuralSeed/NeuralSeed/all_model_data.h")
+source_path = Path("/home/harvey/NeuralSeedTraining/NeuralSeed/NeuralSeed/all_model_data.h")
 dest_path = Path("AudioProcessing/src/NeuralSeedModelData.h")
 main_path = Path("AudioProcessing/src/Main.cpp")
 

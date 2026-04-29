@@ -1,3 +1,9 @@
 build/
 DaisySP/
 libDaisy/
+data/
+.codex
+training/neuralseed/data/
+training/neuralseed/tensorboard/
+training/neuralseed/results/**/*.wav
+training/neuralseed/results/**/maxmemusage.txt

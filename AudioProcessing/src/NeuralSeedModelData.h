@@ -11,7 +11,7 @@ struct NeuralSeedModelData
     std::vector<std::vector<float>> rec_bias;
 };
 
-static NeuralSeedModelData CreateKlondc3SnapG5ModelData()
+static NeuralSeedModelData CreateSelectedNeuralSeedModelData()
 {
     NeuralSeedModelData model;
     //klondc3_snap_g5_p005
