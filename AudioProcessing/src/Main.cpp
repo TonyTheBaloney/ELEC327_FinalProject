@@ -43,9 +43,9 @@ static const Pin POT2_PIN = seed::A5;
 static const Pin POT3_PIN = seed::A7;
 
 // Digital switch pin indices (uint8_t) for hw.GetPin()
-static constexpr uint8_t PIN_TOGGLE_EDIT = 0;        // D1 -> top toggle
+static constexpr uint8_t PIN_TOGGLE_EDIT = 1;        // D1 -> top toggle
 static constexpr uint8_t PIN_TOGGLE_PASSTHROUGH = 2; // D2 -> bottom toggle
-static constexpr uint8_t PIN_BTN_EFFECT_CYCLE = 1;   // D3 -> push button
+static constexpr uint8_t PIN_BTN_EFFECT_CYCLE = 3;   // D3 -> push button
 
 // ──────────────────────────────────────────────
 // ADC channel indices (must match Init order)
@@ -64,6 +64,7 @@ static constexpr int NUM_POTS = 4;
 static constexpr int NUM_EFFECTS = 6;
 static constexpr float SAMPLE_RATE = 48000.f;
 static constexpr float ADC_DEADBAND = 0.005f; // ~0.5% — suppresses pot noise
+static constexpr float SWITCH_UPDATE_RATE_HZ = 1000.f;
 
 // EQ band geometry — fixed corners/center, only gains move with pots
 static constexpr float EQ_BASS_FC = 200.f;    // Hz, low-shelf corner
@@ -701,20 +702,20 @@ int main()
     hw.adc.Start();
 
     // ── Switch init ───────────────────────────
-    // Switch::Init(Pin, debounce_ms, type, polarity)
+    // Switch::Init(Pin, update_rate_hz, type, polarity)
     // hw.GetPin(uint8_t) returns a Pin for digital GPIO pins
     toggleEdit.Init(hw.GetPin(PIN_TOGGLE_EDIT),
-                    1000,
+                    SWITCH_UPDATE_RATE_HZ,
                     Switch::TYPE_TOGGLE,
                     Switch::POLARITY_NORMAL);
 
     togglePassthrough.Init(hw.GetPin(PIN_TOGGLE_PASSTHROUGH),
-                           1000,
+                           SWITCH_UPDATE_RATE_HZ,
                            Switch::TYPE_TOGGLE,
                            Switch::POLARITY_NORMAL);
 
     btnEffectCycle.Init(hw.GetPin(PIN_BTN_EFFECT_CYCLE),
-                        1000,
+                        SWITCH_UPDATE_RATE_HZ,
                         Switch::TYPE_MOMENTARY,
                         Switch::POLARITY_NORMAL);
 
@@ -834,5 +835,7 @@ int main()
             if (changed)
                 ApplyEffectState();
         }
+
+        System::Delay(1);
     }
 }
