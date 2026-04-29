@@ -72,6 +72,7 @@ static constexpr float EQ_MID_Q = 0.7f;       // ~1 octave wide, musical default
 static constexpr float EQ_TREBLE_FC = 4000.f; // Hz, high-shelf corner
 static constexpr float EQ_GAIN_DB = 12.f;
 static constexpr float TWO_PI = 6.28318530717958647692f;
+static constexpr float HALF_PI = 1.57079632679489661923f;
 
 // Lead preset (preset 3) tuning
 static constexpr float LEAD_BOOST_MAX = 2.f; // pot0 max boost (~+6 dB); was 3.f / 5.f earlier
@@ -134,7 +135,7 @@ static EffectState effectStates[NUM_EFFECTS] = {
     {{0.5f, 0.6f, 0.5f, 0.4f}},  // Ambient: unity vol, med-long delay, moderate verb, half chorus
     {{0.3f, 0.5f, 0.4f, 0.3f}},  // Lead: 0.6x volume, mid gain, light depth, mild gate
     {{0.3f, 0.4f, 0.5f, 0.7f}},  // HiGain 808: 0.6x vol, mod gain, mid drive, full mid-hump tone
-    {{0.5f, 0.5f, 0.5f, 0.5f}}   // NeuralSeed: unity vol, default model parameters (pot3 reserved for future use)
+    {{0.5f, 1.0f, 1.0f, 0.5f}}   // NeuralSeed: audible default, full wet/full level
 };
 
 // ──────────────────────────────────────────────
@@ -664,8 +665,11 @@ void AudioCallback(AudioHandle::InputBuffer in,
             // pot0=input gain, pot1=dry/wet mix, pot2=output level
             float gainedIn = inL * (s.params[0] * 3.f);
             float neuralIn[1] = {gainedIn};
-            float wet = neuralModel.forward(neuralIn) + gainedIn;
-            outL = (inL * (1.f - s.params[1]) + wet * s.params[1]) * s.params[2];
+            float wet = neuralModel.forward(neuralIn) + inL;
+            float mix = s.params[1];
+            float dryGain = cosf(mix * HALF_PI);
+            float wetGain = sinf(mix * HALF_PI);
+            outL = (inL * dryGain + wet * wetGain) * s.params[2];
             outR = outL;
             break;
         }
