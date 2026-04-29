@@ -43,9 +43,9 @@ static const Pin POT2_PIN = seed::A5;
 static const Pin POT3_PIN = seed::A7;
 
 // Digital switch pin indices (uint8_t) for hw.GetPin()
-static constexpr uint8_t PIN_TOGGLE_EDIT        = 1;   // D1 -> top toggle
-static constexpr uint8_t PIN_TOGGLE_PASSTHROUGH = 2;   // D2 -> bottom toggle
-static constexpr uint8_t PIN_BTN_EFFECT_CYCLE   = 3;   // D3 -> push button
+static constexpr uint8_t PIN_TOGGLE_EDIT = 0;        // D1 -> top toggle
+static constexpr uint8_t PIN_TOGGLE_PASSTHROUGH = 2; // D2 -> bottom toggle
+static constexpr uint8_t PIN_BTN_EFFECT_CYCLE = 1;   // D3 -> push button
 
 // ──────────────────────────────────────────────
 // ADC channel indices (must match Init order)
@@ -61,7 +61,7 @@ static constexpr int NUM_POTS = 4;
 // Constants
 // ──────────────────────────────────────────────
 
-static constexpr int NUM_EFFECTS = 5;
+static constexpr int NUM_EFFECTS = 6;
 static constexpr float SAMPLE_RATE = 48000.f;
 static constexpr float ADC_DEADBAND = 0.005f; // ~0.5% — suppresses pot noise
 
@@ -74,7 +74,7 @@ static constexpr float EQ_GAIN_DB = 12.f;
 static constexpr float TWO_PI = 6.28318530717958647692f;
 
 // Lead preset (preset 3) tuning
-static constexpr float LEAD_BOOST_MAX = 2.f;     // pot0 max boost (~+6 dB); was 3.f / 5.f earlier
+static constexpr float LEAD_BOOST_MAX = 2.f; // pot0 max boost (~+6 dB); was 3.f / 5.f earlier
 static constexpr float LEAD_AMP_DRIVE = 0.2f;
 static constexpr float LEAD_CAB_FC = 5000.f;
 static constexpr float LEAD_CAB_Q = 0.7f;
@@ -97,7 +97,7 @@ static constexpr float AMBIENT_CHORUS_DEPTH = 0.7f;
 
 // High-gain 808-style preset (preset 4) tuning
 static constexpr float HG808_GAIN_MAX = 8.f; // pot1 input boost ceiling (~+18 dB; was 10/5 earlier)
-static constexpr float HG808_HP_FC = 100.f;   // tighten lows before clipper
+static constexpr float HG808_HP_FC = 100.f;  // tighten lows before clipper
 static constexpr float HG808_HP_Q = 0.7f;
 static constexpr float HG808_PEAK_FC = 700.f; // TS-808 signature mid hump
 static constexpr float HG808_PEAK_Q = 1.0f;
@@ -133,7 +133,8 @@ static EffectState effectStates[NUM_EFFECTS] = {
     {{0.5f, 0.7f, 0.5f, 0.25f}}, // Funk: unity vol, deep wah, half-blend comp, subtle verb
     {{0.5f, 0.6f, 0.5f, 0.4f}},  // Ambient: unity vol, med-long delay, moderate verb, half chorus
     {{0.3f, 0.5f, 0.4f, 0.3f}},  // Lead: 0.6x volume, mid gain, light depth, mild gate
-    {{0.3f, 0.4f, 0.5f, 0.7f}},   // HiGain 808: 0.6x vol, mod gain, mid drive, full mid-hump tone
+    {{0.3f, 0.4f, 0.5f, 0.7f}},  // HiGain 808: 0.6x vol, mod gain, mid drive, full mid-hump tone
+    {{0.5f, 0.5f, 0.5f, 0.5f}}   // NeuralSeed: unity vol, default model parameters (pot3 reserved for future use)
 };
 
 // ──────────────────────────────────────────────
@@ -329,17 +330,18 @@ Overdrive hg808Drive; // saturation stage
 // }
 
 RTNeural::ModelT<float, 1, 1,
-    RTNeural::GRULayerT<float, 1, 10>,
-    RTNeural::DenseT<float, 10, 1>> neuralModel;
+                 RTNeural::GRULayerT<float, 1, 10>,
+                 RTNeural::DenseT<float, 10, 1>>
+    neuralModel;
 
 // ──────────────────────────────────────────────
 // Runtime state
 // ──────────────────────────────────────────────
 
-uint8_t currentEffect  = EFFECT_CHORUS;
-bool    passthrough    = false;
-bool    editingEnabled = false;
-bool    prevEditing    = false;
+uint8_t currentEffect = EFFECT_EQ;
+bool passthrough = false;
+bool editingEnabled = false;
+bool prevEditing = false;
 
 float lastPotValue[NUM_POTS] = {-1.f, -1.f, -1.f, -1.f};
 
@@ -368,8 +370,8 @@ void InitNeuralSeedModel()
 {
     NeuralSeedModelData neuralData = CreateSelectedNeuralSeedModelData();
 
-    auto& gru   = neuralModel.get<0>();
-    auto& dense = neuralModel.get<1>();
+    auto &gru = neuralModel.get<0>();
+    auto &dense = neuralModel.get<1>();
 
     gru.setWVals(neuralData.rec_weight_ih_l0);
     gru.setUVals(neuralData.rec_weight_hh_l0);
@@ -442,8 +444,8 @@ void ApplyEffectState()
     case EFFECT_LEAD:
     {
         // Knob-driven parameters that need a setter call.
-        distortion.SetDrive(s.params[1]);                              // pot1 = combined gain knob
-        noiseGate.SetThreshold(s.params[3] * NOISE_GATE_MAX_THRESH);   // pot3 = gate threshold
+        distortion.SetDrive(s.params[1]);                            // pot1 = combined gain knob
+        noiseGate.SetThreshold(s.params[3] * NOISE_GATE_MAX_THRESH); // pot3 = gate threshold
         // Re-assert lead-flavored reverb voicing in case preset 2 overwrote it.
         reverb.SetFeedback(LEAD_REVERB_FB);
         reverb.SetLpFreq(LEAD_REVERB_LP);
@@ -455,12 +457,12 @@ void ApplyEffectState()
     //     phaser.SetFeedback(s.params[2]);
     //     break;
     case EFFECT_HIGAIN:
-        hg808Drive.SetDrive(s.params[2]);                                                  // pot2 = drive
+        hg808Drive.SetDrive(s.params[2]); // pot2 = drive
         hg808Peak.SetPeak(SAMPLE_RATE, HG808_PEAK_FC, HG808_PEAK_Q,
-                          s.params[3] * HG808_PEAK_GAIN_DB);                               // pot3 = tone (mid hump)
+                          s.params[3] * HG808_PEAK_GAIN_DB); // pot3 = tone (mid hump)
         break;
     case EFFECT_NEURALSEED:
-            break;
+        break;
     }
 }
 
@@ -526,9 +528,9 @@ void AudioCallback(AudioHandle::InputBuffer in,
             // pot1 = compressor parallel mix (here, per-sample)
             // pot2 = reverb wet/dry (here, per-sample)
             // pot3 = output gain (here, per-sample, 0..2x linear)
-            const float out_gain = s.params[0] * 2.f;   // pot0 = output volume
-            const float comp_mix = s.params[2];          // pot2 = compressor parallel mix
-            const float reverb_mix = s.params[3];        // pot3 = reverb wet/dry
+            const float out_gain = s.params[0] * 2.f; // pot0 = output volume
+            const float comp_mix = s.params[2];       // pot2 = compressor parallel mix
+            const float reverb_mix = s.params[3];     // pot3 = reverb wet/dry
 
             // 1. Parallel compression: blend dry with fully-compressed.
             float dry = inL;
@@ -570,9 +572,9 @@ void AudioCallback(AudioHandle::InputBuffer in,
             // pot1 = reverb strength (additive)
             // pot2 = chorus mix (crossfade)
             // pot3 = output gain
-            const float out_gain = s.params[0] * 2.f;   // pot0 = output volume
-            const float reverb_str = s.params[2];        // pot2 = reverb strength
-            const float chorus_mix = s.params[3];        // pot3 = chorus mix
+            const float out_gain = s.params[0] * 2.f; // pot0 = output volume
+            const float reverb_str = s.params[2];     // pot2 = reverb strength
+            const float chorus_mix = s.params[3];     // pot3 = chorus mix
 
             // 1. Chorus: dry/wet crossfade.
             float chOut = chorus.Process(inL);
@@ -613,7 +615,7 @@ void AudioCallback(AudioHandle::InputBuffer in,
             // pot3 = distortion drive (set in ApplyEffectState)
             const float volume = s.params[0] * 2.f;                              // pot0 = output volume
             const float boost_gain = 1.f + s.params[1] * (LEAD_BOOST_MAX - 1.f); // pot1 = gain (boost half)
-            const float wet_mix = s.params[2];                                    // pot2 = reverb/delay depth
+            const float wet_mix = s.params[2];                                   // pot2 = reverb/delay depth
 
             float x = inL * boost_gain;
             x = distortion.Process(x);
@@ -659,15 +661,15 @@ void AudioCallback(AudioHandle::InputBuffer in,
         }
         case EFFECT_NEURALSEED:
         {
-                // pot0=input gain, pot1=dry/wet mix, pot2=output level
-                float gainedIn = inL * (s.params[0] * 3.f);
-                float neuralIn[1] = { gainedIn };
-                float wet = neuralModel.forward(neuralIn) + gainedIn;
-                outL = (inL * (1.f - s.params[1]) + wet * s.params[1]) * s.params[2];
-                outR = outL;
-                break;
+            // pot0=input gain, pot1=dry/wet mix, pot2=output level
+            float gainedIn = inL * (s.params[0] * 3.f);
+            float neuralIn[1] = {gainedIn};
+            float wet = neuralModel.forward(neuralIn) + gainedIn;
+            outL = (inL * (1.f - s.params[1]) + wet * s.params[1]) * s.params[2];
+            outR = outL;
+            break;
         }
-
+        }
         out[0][i] = outL;
         out[1][i] = outR;
     }
