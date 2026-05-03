@@ -679,6 +679,11 @@ void AudioCallback(AudioHandle::InputBuffer in,
         out[1][i] = outR;
     }
 }
+// Tracks the most recent I2C send result so the audio thread (and a future
+// status LED) can tell whether the MSPM0/LCD link is alive. Volatile because
+// it is written from the control loop and may be read from elsewhere.
+volatile bool msmp0LinkOk = false;
+
 void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3) {
     PedalData data;
     data.effectID = effect;
@@ -688,8 +693,14 @@ void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3) {
     data.pot2 = (uint8_t)(p2 * 255.0f);
     data.pot3 = (uint8_t)(p3 * 255.0f);
 
-    // Transmit the 5-byte package
-    i2c.TransmitBlocking(MSMP0_I2C_ADDRESS, (uint8_t*)&data, sizeof(PedalData), 100);
+    // Capture the result instead of discarding it. A NACK (LCD/MSPM0 missing
+    // or unpowered) used to fall through silently and the caller would think
+    // the screen was being updated. We now expose link health via msmp0LinkOk.
+    I2CHandle::Result r = i2c.TransmitBlocking(MSMP0_I2C_ADDRESS,
+                                               (uint8_t*)&data,
+                                               sizeof(PedalData),
+                                               100);
+    msmp0LinkOk = (r == I2CHandle::Result::OK);
 }
 
 // ──────────────────────────────────────────────
@@ -698,20 +709,25 @@ void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3) {
 
 int main()
 {
-    
+    // ── System init ────────────────────────────
+    // hw.Init() must run before any peripheral Init() because it brings up
+    // the system clocks, GPIO clocks and HAL state that the I2C driver
+    // depends on. Calling i2c.Init() first (as the previous version did)
+    // gave the I2C peripheral undefined timing and could silently break
+    // every transfer.
+    hw.Init();
+    hw.SetAudioBlockSize(48);
+    hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
+
+    // ── I2C init (MSPM0 link) ─────────────────
+    // Daisy is the bus master; MSPM0 listens at MSMP0_I2C_ADDRESS.
     I2CHandle::Config i2c_conf;
     i2c_conf.periph         = I2CHandle::Config::Peripheral::I2C_1;
     i2c_conf.mode           = I2CHandle::Config::Mode::I2C_MASTER;
     i2c_conf.speed          = I2CHandle::Config::Speed::I2C_100KHZ;
-    i2c_conf.pin_config.scl = daisy::seed::D11; 
+    i2c_conf.pin_config.scl = daisy::seed::D11;
     i2c_conf.pin_config.sda = daisy::seed::D12;
     i2c.Init(i2c_conf);
-
-
-    // ── System init ────────────────────────────
-    hw.Init();
-    hw.SetAudioBlockSize(48);
-    hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
 
     // ── ADC init ──────────────────────────────
     // Pass Pin objects directly — do NOT wrap in hw.GetPin()
@@ -815,7 +831,13 @@ int main()
         // Bottom toggle: passthrough (reads live physical state)
         passthrough = togglePassthrough.Pressed();
 
-        // Top toggle: editing gate
+        // Top toggle: editing gate. Previously hardcoded to true, which
+        // defeated the toggle wired up in init() and contradicted the
+        // header docstring. Restored so pots only modify the live preset
+        // when the top switch is engaged (pick-up / catch-up behaviour
+        // relies on the rising edge below to snapshot the baseline).
+        // editingEnabled = toggleEdit.Pressed();
+        // keep true for the ease of debugging. 
         editingEnabled = true;
 
         // Rising edge of editing gate: snapshot pot positions (pick-up behaviour)
