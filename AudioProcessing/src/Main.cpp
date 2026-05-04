@@ -861,7 +861,7 @@ int main()
         // relies on the rising edge below to snapshot the baseline).
         // editingEnabled = toggleEdit.Pressed();
         // keep true for the ease of debugging.
-        editingEnabled = true;
+        editingEnabled = toggleEdit.Pressed();
 
         // Rising edge of editing gate: snapshot pot positions (pick-up behaviour)
         if (editingEnabled && !prevEditing)
@@ -877,6 +877,12 @@ int main()
             if (currentEffect == EFFECT_NEURALSEED)
                 neuralModel.reset();
             SyncPotBaseline();
+            
+            SendDataToMSMP0(currentEffect,
+                effectStates[currentEffect].params[0],
+                effectStates[currentEffect].params[1],
+                effectStates[currentEffect].params[2],
+                effectStates[currentEffect].params[3]);
         }
         if (btnEffectBackward.RisingEdge())
         {

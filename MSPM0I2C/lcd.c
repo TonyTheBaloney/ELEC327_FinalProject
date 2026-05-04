@@ -13,20 +13,19 @@
 #define CPUCLK_FREQ 32000000U
 
 #define I2C_0_INST I2C0
-#define I2C_0_INST_INT_IRQN I2C0_INT_IRQn
 
 #define I2C_1_INST I2C1
-#define I2C_1_INST_INT_IRQN I2C1_INT_IRQn
 
+#define MSPM0_ADDR 0x48
 // I2C0 — PA0=SCL, PA1=SDA
-#define I2C0_SCL_IOMUX IOMUX_PINCM1 // PINCM value from table
-#define I2C0_SDA_IOMUX IOMUX_PINCM2
+#define I2C0_SDA_IOMUX IOMUX_PINCM1
+#define I2C0_SCL_IOMUX IOMUX_PINCM2 // PINCM value from table
 #define I2C0_SDA_PINCM_PF IOMUX_PINCM1_PF_I2C0_SDA // PF3
 #define I2C0_SCL_PINCM_PF IOMUX_PINCM2_PF_I2C0_SCL // PF3
 
 // I2C1 — PA17=SCL, PA18=SDA
-#define I2C1_SCL_IOMUX IOMUX_PINCM18 // verify these in table
-#define I2C1_SDA_IOMUX IOMUX_PINCM19
+#define I2C1_SCL_IOMUX IOMUX_PINCM16 // verify these in table
+#define I2C1_SDA_IOMUX IOMUX_PINCM17
 #define I2C1_SCL_PINCM_PF IOMUX_PINCM16_PF_I2C1_SCL // 0x3
 #define I2C1_SDA_PINCM_PF IOMUX_PINCM17_PF_I2C1_SDA // 0x4 ← critical
 
@@ -109,7 +108,7 @@ static void I2C0_Controller_Init(void)
 static void I2C1_Target_Init(void)
 {
     DL_GPIO_initPeripheralInputFunctionFeatures(
-        I2C1_SCL_IOMUX,
+        IOMUX_PINCM16,
         IOMUX_PINCM16_PF_I2C1_SCL | IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM_INENA_ENABLE,
         DL_GPIO_INVERSION_DISABLE,
         DL_GPIO_RESISTOR_NONE,
@@ -117,7 +116,7 @@ static void I2C1_Target_Init(void)
         DL_GPIO_WAKEUP_DISABLE);
 
     DL_GPIO_initPeripheralInputFunctionFeatures(
-        I2C1_SDA_IOMUX,
+        IOMUX_PINCM17,
         IOMUX_PINCM17_PF_I2C1_SDA | IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM_INENA_ENABLE,
         DL_GPIO_INVERSION_DISABLE,
         DL_GPIO_RESISTOR_NONE,
@@ -128,20 +127,16 @@ static void I2C1_Target_Init(void)
     DL_I2C_selectClockDivider(I2C_1_INST, DL_I2C_CLOCK_DIVIDE_1);
 
     // Set and enable our own address — Daisy Seed must write to this address
-    DL_I2C_setTargetOwnAddress(I2C_1_INST, 0x48);
-    DL_I2C_enableTargetOwnAddress(I2C_1_INST);
+    DL_Common_updateReg(&I2C1->SLAVE.SOAR, MSPM0_ADDR, I2C_SOAR_OAR_MASK);
+    I2C1->SLAVE.SOAR |= I2C_SOAR_OAREN_ENABLE;
 
     // Clock stretching: hold SCL low if ISR hasn't drained the RX FIFO yet
-    DL_I2C_enableTargetClockStretching(I2C_1_INST);
+    I2C1->SLAVE.SCTR |= I2C_SCTR_SCLKSTRETCH_ENABLE;
 
-    // RX_DONE fires per byte; STOP fires at end of transaction
-    // Both are needed — see IRQ handler comments for the reasoning
-    DL_I2C_enableInterrupt(
-        I2C_1_INST,
-        DL_I2C_INTERRUPT_TARGET_RX_DONE |
-            DL_I2C_INTERRUPT_TARGET_STOP);
+    I2C1->CPU_INT.IMASK |= DL_I2C_INTERRUPT_TARGET_RX_DONE |
+            DL_I2C_INTERRUPT_TARGET_STOP;
 
-    DL_I2C_enableTarget(I2C_1_INST);
+    I2C1->SLAVE.SCTR |= I2C_SCTR_ACTIVE_ENABLE;
 }
 
 // =============================================================================
@@ -263,34 +258,132 @@ static volatile uint8_t rxCount = 0;
 static volatile bool dataReady = false;
 
 // =============================================================================
-// UI Update
+// Display State
 // =============================================================================
+
+#define PAGE_INTERVAL_MS  2000U
+#define LOCK_DURATION_MS  2000U
+
+static uint32_t displayTimer  = 0;
+static uint32_t lockTimer     = 0;
+static bool     displayLocked = false;
+static uint8_t  displayPage   = 0;   // 0 = pot1/2, 1 = pot2/3
+static PedalData lastData     = {0};
+
+// Called once per ms from main loop — drives page cycling
+static void DisplayTick(void)
+{
+    displayTimer++;
+
+    if (displayLocked)
+    {
+        if (displayTimer - lockTimer >= LOCK_DURATION_MS)
+            displayLocked = false;
+    }
+    else
+    {
+        // Idle: cycle between the two pages every PAGE_INTERVAL_MS
+        if (displayTimer % PAGE_INTERVAL_MS == 0)
+            displayPage ^= 1;
+    }
+}
+
+// =============================================================================
+// Display Update
+// =============================================================================
+
+static void FormatPct(char *out, size_t len, uint8_t raw)
+{
+    snprintf(out, len, "%d%%", (raw * 100) / 255);
+}
 
 static void DisplayPedalData(const PedalData *d)
 {
     char line1[17];
     char line2[17];
-    int p0_pct;
-    int p1_pct;
+    char vVol[5];
+    char vA[5], vB[5];
+    const char *nameA;
+    const char *nameB;
+    uint8_t rawA, rawB;
 
     if (d->effectID >= NUM_EFFECTS)
         return;
 
-    snprintf(line1, sizeof(line1), "[%-10s]", effectNames[d->effectID]);
+    // ── Line 1: effect name + volume (always) ──────────────────────────────
+    FormatPct(vVol, sizeof(vVol), d->pot0);
+    snprintf(line1, sizeof(line1), "%-11.11s V:%s", effectNames[d->effectID], vVol);
 
-    p0_pct = (d->pot0 * 100) / 255;
-    p1_pct = (d->pot1 * 100) / 255;
+    // ── Line 2: two params depending on page ───────────────────────────────
+    if (displayPage == 0)
+    {
+        rawA  = d->pot1; nameA = paramNames[d->effectID][1];
+        rawB  = d->pot2; nameB = paramNames[d->effectID][2];
+    }
+    else
+    {
+        rawA  = d->pot2; nameA = paramNames[d->effectID][2];
+        rawB  = d->pot3; nameB = paramNames[d->effectID][3];
+    }
 
-    // %-3.3s truncates label to 3 chars so two cells fit exactly 16 columns:
-    // 3(label) + 1(:) + 3(digits) + 1(%) = 8 chars per cell, 16 total
-    snprintf(line2, sizeof(line2), "%-3.3s:%03d%%%-3.3s:%03d%%",
-             paramNames[d->effectID][0], p0_pct,
-             paramNames[d->effectID][1], p1_pct);
+    FormatPct(vA, sizeof(vA), rawA);
+    FormatPct(vB, sizeof(vB), rawB);
+
+    snprintf(line2, sizeof(line2), "%.4s:%-4s%.4s:%-4s",
+             nameA, vA, nameB, vB);
 
     LCD_SetCursor(0);
     LCD_Print(line1);
     LCD_SetCursor(1);
     LCD_Print(line2);
+}
+
+// =============================================================================
+// Packet Handler — call this wherever you process dataReady in main loop
+// =============================================================================
+
+static void HandleNewPacket(const PedalData *d)
+{
+    bool pot1Changed = (d->pot1 != lastData.pot1);
+    bool pot2Changed = (d->pot2 != lastData.pot2);
+    bool pot3Changed = (d->pot3 != lastData.pot3);
+    bool effectChanged = (d->effectID != lastData.effectID);
+
+    if (effectChanged)
+    {
+        // Effect switch: reset to page 0, no lock — let user see all params
+        displayPage   = 0;
+        displayLocked = false;
+    }
+    else if (pot1Changed && !pot3Changed)
+    {
+        // pot1 moving: lock to page 0 (pot1+pot2)
+        displayPage   = 0;
+        displayLocked = true;
+        lockTimer     = displayTimer;
+    }
+    else if (pot3Changed && !pot1Changed)
+    {
+        // pot3 moving: lock to page 1 (pot2+pot3)
+        displayPage   = 1;
+        displayLocked = true;
+        lockTimer     = displayTimer;
+    }
+    else if (pot2Changed)
+    {
+        // pot2 is shared — stay on current page, just lock it
+        displayLocked = true;
+        lockTimer     = displayTimer;
+    }
+    else if (pot1Changed && pot3Changed)
+    {
+        // Both outer pots moving simultaneously — stay on current page
+        displayLocked = true;
+        lockTimer     = displayTimer;
+    }
+
+    lastData = *d;
+    DisplayPedalData(d);
 }
 
 // =============================================================================
@@ -338,10 +431,7 @@ void I2C1_IRQHandler(void)
 // =============================================================================
 
 int main(void)
-
 {
-    PedalData snapshot;
-
     MyBoard_Init();
 
     // NHD datasheet: 100ms power-on settle before first command
@@ -356,20 +446,27 @@ int main(void)
 
     // Enable I2C1 interrupts — done here so the target only starts responding
     // after the LCD is initialised and the startup message is shown
-    NVIC_EnableIRQ(I2C_1_INST_INT_IRQN);
+    NVIC_EnableIRQ(I2C1_INT_IRQn);
 
     while (1)
     {
-
         if (dataReady)
         {
-            dataReady = false;  // clear before processing to avoid missing next packet
             PedalData data;
+            __disable_irq();
             memcpy(&data, (const void *)readyBuffer, PEDAL_DATA_SIZE);
+            dataReady = false;
             __enable_irq();
 
-            DisplayPedalData(&snapshot);
+            HandleNewPacket(&data);
         }
-        __WFI();
+
+        DisplayTick();
+
+        // Disable interrupts and enter low-power wait until the next I2C packet arrives.
+        __disable_irq();
+        if (!dataReady)
+            __WFI();
+        __enable_irq();
     }
 }
