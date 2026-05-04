@@ -42,7 +42,7 @@
 // =============================================================================
 
 #define LCD_ADDR 0x28
-#define NUM_EFFECTS 5
+#define NUM_EFFECTS 6
 #define NUM_PARAMS 4
 #define PEDAL_DATA_SIZE 5U
 
@@ -56,7 +56,7 @@ typedef struct __attribute__((packed))
 } PedalData;
 
 static const char *effectNames[NUM_EFFECTS] = {
-    "EQ", "Funk", "Ambient", "Lead", "HiGain"};
+    "EQ", "Funk", "Ambient", "Lead", "HiGain", "Overdrive"};
 
 static const char *paramNames[NUM_EFFECTS][NUM_PARAMS] = {
     {"Level", "Bass", "Mid", "Treble"},
@@ -64,6 +64,7 @@ static const char *paramNames[NUM_EFFECTS][NUM_PARAMS] = {
     {"Volume", "Delay Time", "Rev Level", "Chorus"},
     {"Volume", "Gain", "Wet Mix", "Gate Thr"},
     {"Volume", "Gain", "Drive", "Tone"},
+    {"Volume", "Wet", "Output", "-"}}; // NeuralSeed params are custom, so just label generically
 };
 
 // =============================================================================
@@ -346,14 +347,17 @@ static void HandleNewPacket(const PedalData *d)
 {
     bool pot1Changed = (d->pot1 != lastData.pot1);
     bool pot2Changed = (d->pot2 != lastData.pot2);
-    bool pot3Changed = (d->pot3 != lastData.pot3);
+    bool hasPot3 = (paramNames[d->effectID][3][0] != '-'); // check if param 3 is "None"
+    bool pot3Changed = (d->pot3 != lastData.pot3) && (hasPot3); // ignore pot3 changes if param 3 is "None"
     bool effectChanged = (d->effectID != lastData.effectID);
 
     if (effectChanged)
     {
         // Effect switch: reset to page 0, no lock — let user see all params
         displayPage   = 0;
-        displayLocked = false;
+
+        // Lock if the new effect doesn't have a pot3 
+        displayLocked = !hasPot3;
     }
     else if (pot1Changed && !pot3Changed)
     {
