@@ -110,7 +110,7 @@ static void I2C1_Target_Init(void)
 {
     DL_GPIO_initPeripheralInputFunctionFeatures(
         I2C1_SCL_IOMUX,
-        I2C1_SCL_PINCM_PF | IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM_INENA_ENABLE,
+        IOMUX_PINCM16_PF_I2C1_SCL | IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM_INENA_ENABLE,
         DL_GPIO_INVERSION_DISABLE,
         DL_GPIO_RESISTOR_NONE,
         DL_GPIO_HYSTERESIS_DISABLE,
@@ -118,7 +118,7 @@ static void I2C1_Target_Init(void)
 
     DL_GPIO_initPeripheralInputFunctionFeatures(
         I2C1_SDA_IOMUX,
-        I2C1_SDA_PINCM_PF | IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM_INENA_ENABLE,
+        IOMUX_PINCM17_PF_I2C1_SDA | IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM_INENA_ENABLE,
         DL_GPIO_INVERSION_DISABLE,
         DL_GPIO_RESISTOR_NONE,
         DL_GPIO_HYSTERESIS_DISABLE,
@@ -360,11 +360,12 @@ int main(void)
 
     while (1)
     {
+
         if (dataReady)
         {
-            __disable_irq();
-            memcpy(&snapshot, (const void *)readyBuffer, PEDAL_DATA_SIZE);
-            dataReady = false;
+            dataReady = false;  // clear before processing to avoid missing next packet
+            PedalData data;
+            memcpy(&data, (const void *)readyBuffer, PEDAL_DATA_SIZE);
             __enable_irq();
 
             DisplayPedalData(&snapshot);

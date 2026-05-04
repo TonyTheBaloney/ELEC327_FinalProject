@@ -157,7 +157,7 @@ DaisySeed hw;
 I2CHandle i2c;
 //  I2C address of MSMP0
 // CHANGE TO 21 OR 84 IF DOESN"T WORK!!!
-const uint8_t MSMP0_I2C_ADDRESS = 0x42;
+const uint8_t MSMP0_I2C_ADDRESS = 0x48;
 Switch toggleEdit;
 Switch togglePassthrough;
 Switch btnEffectForward;
