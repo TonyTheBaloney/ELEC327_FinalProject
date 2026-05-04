@@ -312,33 +312,52 @@ static void DisplayPedalData(const PedalData *d)
     const char *nameB;
     uint8_t rawA, rawB;
     
+
+    
     bool passthrough = (d->states & TOGGLE_PASSTHROUGH_MASK) != 0;
     bool canEdit = (d->states & TOGGLE_EDITING_MASK) != 0;
 
     if (d->effectID >= NUM_EFFECTS)
         return;
 
-    // ── Line 1: effect name + volume (always) ──────────────────────────────
+    // ── Line 1: effect name + mode indicator + volume ──────────────────────────
     FormatPct(vVol, sizeof(vVol), d->pot0);
-    snprintf(line1, sizeof(line1), "%-11.11s V:%s", effectNames[d->effectID], vVol);
 
-    // ── Line 2: two params depending on page ───────────────────────────────
-    if (displayPage == 0)
+    const char *modeTag = "";
+    if (passthrough)
+        modeTag = "[P]";
+    else if (canEdit)
+        modeTag = "[E]";
+    else
+        modeTag = "   ";
+
+    snprintf(line1, sizeof(line1), "%-8.8s%s V:%s",
+            effectNames[d->effectID], modeTag, vVol);
+
+    // ── Line 2: bypass message or normal params ─────────────────────────────────
+    if (passthrough)
     {
-        rawA  = d->pot1; nameA = paramNames[d->effectID][1];
-        rawB  = d->pot2; nameB = paramNames[d->effectID][2];
+        snprintf(line2, sizeof(line2), "  -- BYPASS --  ");
     }
     else
     {
-        rawA  = d->pot2; nameA = paramNames[d->effectID][2];
-        rawB  = d->pot3; nameB = paramNames[d->effectID][3];
+        if (displayPage == 0)
+        {
+            rawA  = d->pot1; nameA = paramNames[d->effectID][1];
+            rawB  = d->pot2; nameB = paramNames[d->effectID][2];
+        }
+        else
+        {
+            rawA  = d->pot2; nameA = paramNames[d->effectID][2];
+            rawB  = d->pot3; nameB = paramNames[d->effectID][3];
+        }
+
+        FormatPct(vA, sizeof(vA), rawA);
+        FormatPct(vB, sizeof(vB), rawB);
+
+        snprintf(line2, sizeof(line2), "%.4s:%-4s%.4s:%-4s",
+                nameA, vA, nameB, vB);
     }
-
-    FormatPct(vA, sizeof(vA), rawA);
-    FormatPct(vB, sizeof(vB), rawB);
-
-    snprintf(line2, sizeof(line2), "%.4s:%-4s%.4s:%-4s",
-             nameA, vA, nameB, vB);
 
     LCD_SetCursor(0);
     LCD_Print(line1);
