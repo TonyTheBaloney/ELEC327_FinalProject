@@ -140,12 +140,25 @@ static EffectState effectStates[NUM_EFFECTS] = {
     {{0.5f, 1.0f, 1.0f, 0.5f}}   // NeuralSeed: audible default, full wet/full level
 };
 
+
+struct __attribute__((packed)) PedalData {
+    uint8_t effectID; // 0 = EQ, 1 = Funk, 2 = Ambient, 3 = Lead, 4 = HiGain
+    uint8_t pot0;     // 0-255
+    uint8_t pot1;     // 0-255
+    uint8_t pot2;     // 0-255
+    uint8_t pot3;     // 0-255
+};
+
+
 // ──────────────────────────────────────────────
 // Global hardware & DSP objects
 // ──────────────────────────────────────────────
 
 DaisySeed hw;
-
+I2CHandle i2c;
+//  I2C address of MSMP0 
+// CHANGE TO 21 OR 84 IF DOESN"T WORK!!!
+const uint8_t MSMP0_I2C_ADDRESS = 0x42;
 Switch toggleEdit;
 Switch togglePassthrough;
 Switch btnEffectForward;
@@ -681,6 +694,29 @@ void AudioCallback(AudioHandle::InputBuffer in,
         out[1][i] = outR;
     }
 }
+// Tracks the most recent I2C send result so the audio thread (and a future
+// status LED) can tell whether the MSPM0/LCD link is alive. Volatile because
+// it is written from the control loop and may be read from elsewhere.
+volatile bool msmp0LinkOk = false;
+
+void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3) {
+    PedalData data;
+    data.effectID = effect;
+    // Convert 0.0 - 1.0 float values to 0 - 255 integer values
+    data.pot0 = (uint8_t)(p0 * 255.0f);
+    data.pot1 = (uint8_t)(p1 * 255.0f);
+    data.pot2 = (uint8_t)(p2 * 255.0f);
+    data.pot3 = (uint8_t)(p3 * 255.0f);
+
+    // Capture the result instead of discarding it. A NACK (LCD/MSPM0 missing
+    // or unpowered) used to fall through silently and the caller would think
+    // the screen was being updated. We now expose link health via msmp0LinkOk.
+    I2CHandle::Result r = i2c.TransmitBlocking(MSMP0_I2C_ADDRESS,
+                                               (uint8_t*)&data,
+                                               sizeof(PedalData),
+                                               100);
+    msmp0LinkOk = (r == I2CHandle::Result::OK);
+}
 
 // ──────────────────────────────────────────────
 // main
@@ -689,9 +725,24 @@ void AudioCallback(AudioHandle::InputBuffer in,
 int main()
 {
     // ── System init ────────────────────────────
+    // hw.Init() must run before any peripheral Init() because it brings up
+    // the system clocks, GPIO clocks and HAL state that the I2C driver
+    // depends on. Calling i2c.Init() first (as the previous version did)
+    // gave the I2C peripheral undefined timing and could silently break
+    // every transfer.
     hw.Init();
     hw.SetAudioBlockSize(48);
     hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
+
+    // ── I2C init (MSPM0 link) ─────────────────
+    // Daisy is the bus master; MSPM0 listens at MSMP0_I2C_ADDRESS.
+    I2CHandle::Config i2c_conf;
+    i2c_conf.periph         = I2CHandle::Config::Peripheral::I2C_1;
+    i2c_conf.mode           = I2CHandle::Config::Mode::I2C_MASTER;
+    i2c_conf.speed          = I2CHandle::Config::Speed::I2C_100KHZ;
+    i2c_conf.pin_config.scl = daisy::seed::D11;
+    i2c_conf.pin_config.sda = daisy::seed::D12;
+    i2c.Init(i2c_conf);
 
     // ── ADC init ──────────────────────────────
     // Pass Pin objects directly — do NOT wrap in hw.GetPin()
@@ -803,7 +854,13 @@ int main()
         // Bottom toggle: passthrough (reads live physical state)
         passthrough = togglePassthrough.Pressed();
 
-        // Top toggle: editing gate
+        // Top toggle: editing gate. Previously hardcoded to true, which
+        // defeated the toggle wired up in init() and contradicted the
+        // header docstring. Restored so pots only modify the live preset
+        // when the top switch is engaged (pick-up / catch-up behaviour
+        // relies on the rising edge below to snapshot the baseline).
+        // editingEnabled = toggleEdit.Pressed();
+        // keep true for the ease of debugging. 
         editingEnabled = true;
 
         // Rising edge of editing gate: snapshot pot positions (pick-up behaviour)
@@ -828,6 +885,13 @@ int main()
             if (currentEffect == EFFECT_NEURALSEED)
                 neuralModel.reset();
             SyncPotBaseline();
+            
+            // SEND TO LCD: Preset changed
+            SendDataToMSMP0(currentEffect, 
+                            effectStates[currentEffect].params[0],
+                            effectStates[currentEffect].params[1],
+                            effectStates[currentEffect].params[2],
+                            effectStates[currentEffect].params[3]);
         }
 
         // Pots → effect parameter state (only when editing, not bypassed)
@@ -848,9 +912,17 @@ int main()
             }
 
             if (changed)
+            {
                 ApplyEffectState();
-        }
 
-        System::Delay(1);
+                SendDataToMSMP0(currentEffect, 
+                            effectStates[currentEffect].params[0],
+                            effectStates[currentEffect].params[1],
+                            effectStates[currentEffect].params[2],
+                            effectStates[currentEffect].params[3]);
+                
+            }   
+        
     }
+}
 }
