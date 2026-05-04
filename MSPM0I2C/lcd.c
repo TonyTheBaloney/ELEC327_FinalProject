@@ -68,7 +68,7 @@ static const char *paramNames[NUM_EFFECTS][NUM_PARAMS] = {
     {"Volume", "Delay Time", "Rev Level", "Chorus"},
     {"Volume", "Gain", "Wet Mix", "Gate Thr"},
     {"Volume", "Gain", "Drive", "Tone"},
-    {"Volume", "Wet", "Output", "-"}}; // NeuralSeed params are custom, so just label generically
+    {"Volume", "Wet", "Output", "-"}, // NeuralSeed params are custom, so just label generically
 };
 
 // =============================================================================
