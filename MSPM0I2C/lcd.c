@@ -161,7 +161,7 @@ static void MyBoard_Init(void)
     delay_cycles(POWER_STARTUP_DELAY);
 
     // Step 3: Now safe to reset
-    gpio->GPRCM.RSTCTL =
+    GPIOA->GPRCM.RSTCTL =
         (GPIO_RSTCTL_KEY_UNLOCK_W | GPIO_RSTCTL_RESETSTKYCLR_CLR |
          GPIO_RSTCTL_RESETASSERT_ASSERT);
     I2C0->GPRCM.RSTCTL =
