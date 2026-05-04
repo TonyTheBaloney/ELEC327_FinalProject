@@ -139,6 +139,10 @@ static EffectState effectStates[NUM_EFFECTS] = {
     {{0.3f, 0.4f, 0.5f, 0.7f}},  // HiGain 808: 0.6x vol, mod gain, mid drive, full mid-hump tone
     {{0.5f, 1.0f, 1.0f, 0.5f}}   // NeuralSeed: audible default, full wet/full level
 };
+#define TOGGLE_PASSTHROUGH_IDX 0
+#define TOGGLE_EDITING_IDX 1
+#define TOGGLE_PASSTHROUGH_MASK (1 << TOGGLE_PASSTHROUGH_IDX)
+#define TOGGLE_EDITING_MASK       (1 << TOGGLE_EDITING_IDX)
 
 struct __attribute__((packed)) PedalData
 {
@@ -147,6 +151,7 @@ struct __attribute__((packed)) PedalData
     uint8_t pot1;     // 0-255
     uint8_t pot2;     // 0-255
     uint8_t pot3;     // 0-255
+    uint8_t states;  // Bitfield for toggle states. Bit 0 = passthrough, Bit 1 = editing mode
 };
 
 // ──────────────────────────────────────────────
@@ -698,7 +703,7 @@ void AudioCallback(AudioHandle::InputBuffer in,
 // it is written from the control loop and may be read from elsewhere.
 volatile bool msmp0LinkOk = false;
 
-void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3)
+void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3, bool passthrough, bool editing)
 {
     PedalData data;
     data.effectID = effect;
@@ -707,6 +712,7 @@ void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3)
     data.pot1 = (uint8_t)(p1 * 255.0f);
     data.pot2 = (uint8_t)(p2 * 255.0f);
     data.pot3 = (uint8_t)(p3 * 255.0f);
+    data.states = ((passthrough & 0x1) << TOGGLE_PASSTHROUGH_IDX) | ((editing & 0x1) << TOGGLE_EDITING_IDX);
 
     // Capture the result instead of discarding it. A NACK (LCD/MSPM0 missing
     // or unpowered) used to fall through silently and the caller would think
@@ -882,7 +888,9 @@ int main()
                 effectStates[currentEffect].params[0],
                 effectStates[currentEffect].params[1],
                 effectStates[currentEffect].params[2],
-                effectStates[currentEffect].params[3]);
+                effectStates[currentEffect].params[3],
+                passthrough,
+                editingEnabled);
         }
         if (btnEffectBackward.RisingEdge())
         {
@@ -897,7 +905,9 @@ int main()
                             effectStates[currentEffect].params[0],
                             effectStates[currentEffect].params[1],
                             effectStates[currentEffect].params[2],
-                            effectStates[currentEffect].params[3]);
+                            effectStates[currentEffect].params[3],
+                            passthrough,
+                            editingEnabled);
         }
 
         // Pots → effect parameter state (only when editing, not bypassed)
@@ -925,7 +935,9 @@ int main()
                                 effectStates[currentEffect].params[0],
                                 effectStates[currentEffect].params[1],
                                 effectStates[currentEffect].params[2],
-                                effectStates[currentEffect].params[3]);
+                                effectStates[currentEffect].params[3],
+                                passthrough,
+                                editingEnabled);
             }
         }
     }

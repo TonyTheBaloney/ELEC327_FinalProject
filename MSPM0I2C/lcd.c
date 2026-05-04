@@ -46,6 +46,9 @@
 #define NUM_PARAMS 4
 #define PEDAL_DATA_SIZE 5U
 
+#define TOGGLE_PASSTHROUGH_MASK (1 << 0)
+#define TOGGLE_EDITING_MASK       (1 << 1)
+
 typedef struct __attribute__((packed))
 {
     uint8_t effectID;
@@ -53,6 +56,7 @@ typedef struct __attribute__((packed))
     uint8_t pot1;
     uint8_t pot2;
     uint8_t pot3;
+    uint8_t states; // Bitfield for toggle states. 
 } PedalData;
 
 static const char *effectNames[NUM_EFFECTS] = {
@@ -307,6 +311,9 @@ static void DisplayPedalData(const PedalData *d)
     const char *nameA;
     const char *nameB;
     uint8_t rawA, rawB;
+    
+    bool passthrough = (d->states & TOGGLE_PASSTHROUGH_MASK) != 0;
+    bool canEdit = (d->states & TOGGLE_EDITING_MASK) != 0;
 
     if (d->effectID >= NUM_EFFECTS)
         return;
