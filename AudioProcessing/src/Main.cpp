@@ -43,9 +43,10 @@ static const Pin POT2_PIN = seed::A5;
 static const Pin POT3_PIN = seed::A7;
 
 // Digital switch pin indices (uint8_t) for hw.GetPin()
-static constexpr uint8_t PIN_TOGGLE_EDIT = 1;        // D1 -> top toggle
-static constexpr uint8_t PIN_TOGGLE_PASSTHROUGH = 2; // D2 -> bottom toggle
-static constexpr uint8_t PIN_BTN_EFFECT_CYCLE = 3;   // D3 -> push button
+static constexpr Pin PIN_TOGGLE_EDIT = seed::D1;        // D1 -> top toggle
+static constexpr Pin PIN_TOGGLE_PASSTHROUGH = seed::D2; // D2 -> bottom toggle
+static constexpr Pin PIN_BTN_EFFECT_FORWARD = seed::D30;   // D3 -> push button
+static constexpr Pin PIN_BTN_EFFECT_BACKWARD = seed::D29;   // D4 -> (optional) second push button for reverse cycling
 
 // ──────────────────────────────────────────────
 // ADC channel indices (must match Init order)
@@ -147,7 +148,8 @@ DaisySeed hw;
 
 Switch toggleEdit;
 Switch togglePassthrough;
-Switch btnEffectCycle;
+Switch btnEffectForward;
+Switch btnEffectBackward; // optional second button for reverse cycling through presets
 
 // Overdrive overdrive;   // preset 0 is now EQ; no DSP object needed
 Chorus chorus;   // shared by Ambient (preset 2)
@@ -704,21 +706,25 @@ int main()
     // ── Switch init ───────────────────────────
     // Switch::Init(Pin, update_rate_hz, type, polarity)
     // hw.GetPin(uint8_t) returns a Pin for digital GPIO pins
-    toggleEdit.Init(hw.GetPin(PIN_TOGGLE_EDIT),
+    toggleEdit.Init(PIN_TOGGLE_EDIT,
                     SWITCH_UPDATE_RATE_HZ,
                     Switch::TYPE_TOGGLE,
-                    Switch::POLARITY_NORMAL);
+                    Switch::POLARITY_NORMAL); // inverted: ON = GND, OFF = floating with pullup
 
-    togglePassthrough.Init(hw.GetPin(PIN_TOGGLE_PASSTHROUGH),
+    togglePassthrough.Init(PIN_TOGGLE_PASSTHROUGH,
                            SWITCH_UPDATE_RATE_HZ,
                            Switch::TYPE_TOGGLE,
-                           Switch::POLARITY_NORMAL);
+                           Switch::POLARITY_INVERTED);
 
-    btnEffectCycle.Init(hw.GetPin(PIN_BTN_EFFECT_CYCLE),
+    btnEffectForward.Init(PIN_BTN_EFFECT_FORWARD,
                         SWITCH_UPDATE_RATE_HZ,
                         Switch::TYPE_MOMENTARY,
                         Switch::POLARITY_NORMAL);
 
+    btnEffectBackward.Init(PIN_BTN_EFFECT_BACKWARD,
+                           1000,
+                           Switch::TYPE_MOMENTARY,
+                           Switch::POLARITY_NORMAL);
     // ── DSP init ──────────────────────────────
     // overdrive.Init();
     // overdrive.SetDrive(0.5f);
@@ -791,7 +797,8 @@ int main()
     {
         toggleEdit.Debounce();
         togglePassthrough.Debounce();
-        btnEffectCycle.Debounce();
+        btnEffectForward.Debounce();
+        btnEffectBackward.Debounce();
 
         // Bottom toggle: passthrough (reads live physical state)
         passthrough = togglePassthrough.Pressed();
@@ -806,9 +813,17 @@ int main()
         prevEditing = editingEnabled;
 
         // Push button: cycle effect preset
-        if (btnEffectCycle.RisingEdge())
+        if (btnEffectForward.RisingEdge())
         {
             currentEffect = (currentEffect + 1) % NUM_EFFECTS;
+            ApplyEffectState();
+            if (currentEffect == EFFECT_NEURALSEED)
+                neuralModel.reset();
+            SyncPotBaseline();
+        }
+        if (btnEffectBackward.RisingEdge())
+        {
+            currentEffect = (currentEffect + NUM_EFFECTS - 1) % NUM_EFFECTS;
             ApplyEffectState();
             if (currentEffect == EFFECT_NEURALSEED)
                 neuralModel.reset();
