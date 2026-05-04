@@ -43,10 +43,10 @@ static const Pin POT2_PIN = seed::A5;
 static const Pin POT3_PIN = seed::A7;
 
 // Digital switch pin indices (uint8_t) for hw.GetPin()
-static constexpr Pin PIN_TOGGLE_EDIT = seed::D1;        // D1 -> top toggle
-static constexpr Pin PIN_TOGGLE_PASSTHROUGH = seed::D2; // D2 -> bottom toggle
-static constexpr Pin PIN_BTN_EFFECT_FORWARD = seed::D30;   // D3 -> push button
-static constexpr Pin PIN_BTN_EFFECT_BACKWARD = seed::D29;   // D4 -> (optional) second push button for reverse cycling
+static constexpr Pin PIN_TOGGLE_EDIT = seed::D1;          // D1 -> top toggle
+static constexpr Pin PIN_TOGGLE_PASSTHROUGH = seed::D2;   // D2 -> bottom toggle
+static constexpr Pin PIN_BTN_EFFECT_FORWARD = seed::D30;  // D3 -> push button
+static constexpr Pin PIN_BTN_EFFECT_BACKWARD = seed::D29; // D4 -> (optional) second push button for reverse cycling
 
 // ──────────────────────────────────────────────
 // ADC channel indices (must match Init order)
@@ -140,8 +140,8 @@ static EffectState effectStates[NUM_EFFECTS] = {
     {{0.5f, 1.0f, 1.0f, 0.5f}}   // NeuralSeed: audible default, full wet/full level
 };
 
-
-struct __attribute__((packed)) PedalData {
+struct __attribute__((packed)) PedalData
+{
     uint8_t effectID; // 0 = EQ, 1 = Funk, 2 = Ambient, 3 = Lead, 4 = HiGain
     uint8_t pot0;     // 0-255
     uint8_t pot1;     // 0-255
@@ -149,14 +149,13 @@ struct __attribute__((packed)) PedalData {
     uint8_t pot3;     // 0-255
 };
 
-
 // ──────────────────────────────────────────────
 // Global hardware & DSP objects
 // ──────────────────────────────────────────────
 
 DaisySeed hw;
 I2CHandle i2c;
-//  I2C address of MSMP0 
+//  I2C address of MSMP0
 // CHANGE TO 21 OR 84 IF DOESN"T WORK!!!
 const uint8_t MSMP0_I2C_ADDRESS = 0x42;
 Switch toggleEdit;
@@ -699,7 +698,8 @@ void AudioCallback(AudioHandle::InputBuffer in,
 // it is written from the control loop and may be read from elsewhere.
 volatile bool msmp0LinkOk = false;
 
-void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3) {
+void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3)
+{
     PedalData data;
     data.effectID = effect;
     // Convert 0.0 - 1.0 float values to 0 - 255 integer values
@@ -712,7 +712,7 @@ void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3) {
     // or unpowered) used to fall through silently and the caller would think
     // the screen was being updated. We now expose link health via msmp0LinkOk.
     I2CHandle::Result r = i2c.TransmitBlocking(MSMP0_I2C_ADDRESS,
-                                               (uint8_t*)&data,
+                                               (uint8_t *)&data,
                                                sizeof(PedalData),
                                                100);
     msmp0LinkOk = (r == I2CHandle::Result::OK);
@@ -737,9 +737,9 @@ int main()
     // ── I2C init (MSPM0 link) ─────────────────
     // Daisy is the bus master; MSPM0 listens at MSMP0_I2C_ADDRESS.
     I2CHandle::Config i2c_conf;
-    i2c_conf.periph         = I2CHandle::Config::Peripheral::I2C_1;
-    i2c_conf.mode           = I2CHandle::Config::Mode::I2C_MASTER;
-    i2c_conf.speed          = I2CHandle::Config::Speed::I2C_100KHZ;
+    i2c_conf.periph = I2CHandle::Config::Peripheral::I2C_1;
+    i2c_conf.mode = I2CHandle::Config::Mode::I2C_MASTER;
+    i2c_conf.speed = I2CHandle::Config::Speed::I2C_100KHZ;
     i2c_conf.pin_config.scl = daisy::seed::D11;
     i2c_conf.pin_config.sda = daisy::seed::D12;
     i2c.Init(i2c_conf);
@@ -768,9 +768,9 @@ int main()
                            Switch::POLARITY_INVERTED);
 
     btnEffectForward.Init(PIN_BTN_EFFECT_FORWARD,
-                        SWITCH_UPDATE_RATE_HZ,
-                        Switch::TYPE_MOMENTARY,
-                        Switch::POLARITY_NORMAL);
+                          SWITCH_UPDATE_RATE_HZ,
+                          Switch::TYPE_MOMENTARY,
+                          Switch::POLARITY_NORMAL);
 
     btnEffectBackward.Init(PIN_BTN_EFFECT_BACKWARD,
                            1000,
@@ -860,7 +860,7 @@ int main()
         // when the top switch is engaged (pick-up / catch-up behaviour
         // relies on the rising edge below to snapshot the baseline).
         // editingEnabled = toggleEdit.Pressed();
-        // keep true for the ease of debugging. 
+        // keep true for the ease of debugging.
         editingEnabled = true;
 
         // Rising edge of editing gate: snapshot pot positions (pick-up behaviour)
@@ -885,9 +885,9 @@ int main()
             if (currentEffect == EFFECT_NEURALSEED)
                 neuralModel.reset();
             SyncPotBaseline();
-            
+
             // SEND TO LCD: Preset changed
-            SendDataToMSMP0(currentEffect, 
+            SendDataToMSMP0(currentEffect,
                             effectStates[currentEffect].params[0],
                             effectStates[currentEffect].params[1],
                             effectStates[currentEffect].params[2],
@@ -915,14 +915,12 @@ int main()
             {
                 ApplyEffectState();
 
-                SendDataToMSMP0(currentEffect, 
-                            effectStates[currentEffect].params[0],
-                            effectStates[currentEffect].params[1],
-                            effectStates[currentEffect].params[2],
-                            effectStates[currentEffect].params[3]);
-                
-            }   
-        
+                SendDataToMSMP0(currentEffect,
+                                effectStates[currentEffect].params[0],
+                                effectStates[currentEffect].params[1],
+                                effectStates[currentEffect].params[2],
+                                effectStates[currentEffect].params[3]);
+            }
+        }
     }
-}
 }

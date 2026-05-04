@@ -10,44 +10,45 @@
 // Board / Peripheral Definitions
 // =============================================================================
 
-#define CPUCLK_FREQ             32000000U
+#define CPUCLK_FREQ 32000000U
 
-#define I2C_0_INST              I2C0
-#define I2C_0_INST_INT_IRQN     I2C0_INT_IRQn
+#define I2C_0_INST I2C0
+#define I2C_0_INST_INT_IRQN I2C0_INT_IRQn
 
-#define I2C_1_INST              I2C1
-#define I2C_1_INST_INT_IRQN     I2C1_INT_IRQn
+#define I2C_1_INST I2C1
+#define I2C_1_INST_INT_IRQN I2C1_INT_IRQn
 
 // I2C0 — PA0=SCL, PA1=SDA
-#define I2C0_SCL_IOMUX    IOMUX_PINCM1   // PINCM value from table
-#define I2C0_SDA_IOMUX    IOMUX_PINCM2
-#define I2C0_SDA_PINCM_PF IOMUX_PINCM1_PF_I2C0_SDA   // PF3
-#define I2C0_SCL_PINCM_PF IOMUX_PINCM2_PF_I2C0_SCL   // PF3
+#define I2C0_SCL_IOMUX IOMUX_PINCM1 // PINCM value from table
+#define I2C0_SDA_IOMUX IOMUX_PINCM2
+#define I2C0_SDA_PINCM_PF IOMUX_PINCM1_PF_I2C0_SDA // PF3
+#define I2C0_SCL_PINCM_PF IOMUX_PINCM2_PF_I2C0_SCL // PF3
 
 // I2C1 — PA17=SCL, PA18=SDA
-#define I2C1_SCL_IOMUX    IOMUX_PINCM18  // verify these in table
-#define I2C1_SDA_IOMUX    IOMUX_PINCM19
-#define I2C1_SCL_PINCM_PF   IOMUX_PINCM16_PF_I2C1_SCL  // 0x3
-#define I2C1_SDA_PINCM_PF   IOMUX_PINCM17_PF_I2C1_SDA  // 0x4 ← critical
+#define I2C1_SCL_IOMUX IOMUX_PINCM18 // verify these in table
+#define I2C1_SDA_IOMUX IOMUX_PINCM19
+#define I2C1_SCL_PINCM_PF IOMUX_PINCM16_PF_I2C1_SCL // 0x3
+#define I2C1_SDA_PINCM_PF IOMUX_PINCM17_PF_I2C1_SDA // 0x4 ← critical
 
 // Guard against redefining delay_cycles if the SDK already defines it
 #ifndef delay_cycles
-#define delay_cycles(n)         DL_Common_delayCycles(n)
+#define delay_cycles(n) DL_Common_delayCycles(n)
 #endif
 
-#define CYCLES_PER_MS           (CPUCLK_FREQ / 1000U)
-#define POWER_STARTUP_DELAY     16U
+#define CYCLES_PER_MS (CPUCLK_FREQ / 1000U)
+#define POWER_STARTUP_DELAY 16U
 
 // =============================================================================
 // Config & Data Structures
 // =============================================================================
 
-#define LCD_ADDR        0x28
-#define NUM_EFFECTS     5
-#define NUM_PARAMS      4
+#define LCD_ADDR 0x28
+#define NUM_EFFECTS 5
+#define NUM_PARAMS 4
 #define PEDAL_DATA_SIZE 5U
 
-typedef struct __attribute__((packed)) {
+typedef struct __attribute__((packed))
+{
     uint8_t effectID;
     uint8_t pot0;
     uint8_t pot1;
@@ -55,16 +56,15 @@ typedef struct __attribute__((packed)) {
     uint8_t pot3;
 } PedalData;
 
-static const char* effectNames[NUM_EFFECTS] = {
-    "EQ", "Funk", "Ambient", "Lead", "HiGain"
-};
+static const char *effectNames[NUM_EFFECTS] = {
+    "EQ", "Funk", "Ambient", "Lead", "HiGain"};
 
-static const char* paramNames[NUM_EFFECTS][NUM_PARAMS] = {
-    {"Level",  "Bass",       "Mid",       "Treble"  },
-    {"Volume", "Wah Depth",  "Comp Mix",  "Rev Mix" },
-    {"Volume", "Delay Time", "Rev Level", "Chorus"  },
-    {"Volume", "Gain",       "Wet Mix",   "Gate Thr"},
-    {"Volume", "Gain",       "Drive",     "Tone"    },
+static const char *paramNames[NUM_EFFECTS][NUM_PARAMS] = {
+    {"Level", "Bass", "Mid", "Treble"},
+    {"Volume", "Wah Depth", "Comp Mix", "Rev Mix"},
+    {"Volume", "Delay Time", "Rev Level", "Chorus"},
+    {"Volume", "Gain", "Wet Mix", "Gate Thr"},
+    {"Volume", "Gain", "Drive", "Tone"},
 };
 
 // =============================================================================
@@ -91,7 +91,7 @@ static void I2C0_Controller_Init(void)
 
     DL_I2C_selectClockSource(I2C_0_INST, DL_I2C_CLOCK_BUSCLK);
     DL_I2C_selectClockDivider(I2C_0_INST, DL_I2C_CLOCK_DIVIDE_1);
-    DL_I2C_setTimerPeriod(I2C_0_INST, 63);  // 50kHz
+    DL_I2C_setTimerPeriod(I2C_0_INST, 63); // 50kHz
     DL_I2C_enableControllerClockStretching(I2C_0_INST);
 
     // Set trigger levels — no flush needed after clean reset
@@ -139,7 +139,7 @@ static void I2C1_Target_Init(void)
     DL_I2C_enableInterrupt(
         I2C_1_INST,
         DL_I2C_INTERRUPT_TARGET_RX_DONE |
-        DL_I2C_INTERRUPT_TARGET_STOP);
+            DL_I2C_INTERRUPT_TARGET_STOP);
 
     DL_I2C_enableTarget(I2C_1_INST);
 }
@@ -163,19 +163,19 @@ static void MyBoard_Init(void)
     // Step 3: Now safe to reset
     gpio->GPRCM.RSTCTL =
         (GPIO_RSTCTL_KEY_UNLOCK_W | GPIO_RSTCTL_RESETSTKYCLR_CLR |
-            GPIO_RSTCTL_RESETASSERT_ASSERT);
+         GPIO_RSTCTL_RESETASSERT_ASSERT);
     I2C0->GPRCM.RSTCTL =
         (I2C_RSTCTL_KEY_UNLOCK_W | I2C_RSTCTL_RESETSTKYCLR_CLR |
-            I2C_RSTCTL_RESETASSERT_ASSERT);
+         I2C_RSTCTL_RESETASSERT_ASSERT);
     I2C1->GPRCM.RSTCTL =
         (I2C_RSTCTL_KEY_UNLOCK_W | I2C_RSTCTL_RESETSTKYCLR_CLR |
-            I2C_RSTCTL_RESETASSERT_ASSERT);
+         I2C_RSTCTL_RESETASSERT_ASSERT);
 
     delay_cycles(POWER_STARTUP_DELAY);
-    
+
     GPIOA->GPRCM.PWREN = GPIO_PWREN_KEY_UNLOCK_W | GPIO_PWREN_ENABLE_ENABLE;
-    I2C0->GPRCM.PWREN  = I2C_PWREN_KEY_UNLOCK_W  | I2C_PWREN_ENABLE_ENABLE;
-    I2C1->GPRCM.PWREN  = I2C_PWREN_KEY_UNLOCK_W  | I2C_PWREN_ENABLE_ENABLE;
+    I2C0->GPRCM.PWREN = I2C_PWREN_KEY_UNLOCK_W | I2C_PWREN_ENABLE_ENABLE;
+    I2C1->GPRCM.PWREN = I2C_PWREN_KEY_UNLOCK_W | I2C_PWREN_ENABLE_ENABLE;
 
     // Step 4: Configure
     I2C0_Controller_Init();
@@ -190,16 +190,18 @@ static bool I2C_SendBytes(uint8_t *data, uint16_t length)
 {
     uint16_t i;
     uint32_t status;
-    
 
     DL_I2C_startControllerTransfer(
         I2C_0_INST, LCD_ADDR, DL_I2C_CONTROLLER_DIRECTION_TX, length);
 
-    for (i = 0; i < length; i++) {
-        while (DL_I2C_isControllerTXFIFOFull(I2C_0_INST)) {
+    for (i = 0; i < length; i++)
+    {
+        while (DL_I2C_isControllerTXFIFOFull(I2C_0_INST))
+        {
             status = DL_I2C_getControllerStatus(I2C_0_INST);
             if (status & (DL_I2C_CONTROLLER_STATUS_ERROR |
-                          DL_I2C_CONTROLLER_STATUS_ARBITRATION_LOST)) {
+                          DL_I2C_CONTROLLER_STATUS_ARBITRATION_LOST))
+            {
                 return false;
             }
         }
@@ -208,10 +210,12 @@ static bool I2C_SendBytes(uint8_t *data, uint16_t length)
 
     // Wait for IDLE not BUSY_BUS — BUSY_BUS clears while FIFO still drains
     while (!(DL_I2C_getControllerStatus(I2C_0_INST) &
-             DL_I2C_CONTROLLER_STATUS_IDLE)) {
+             DL_I2C_CONTROLLER_STATUS_IDLE))
+    {
         status = DL_I2C_getControllerStatus(I2C_0_INST);
         if (status & (DL_I2C_CONTROLLER_STATUS_ERROR |
-                      DL_I2C_CONTROLLER_STATUS_ARBITRATION_LOST)) {
+                      DL_I2C_CONTROLLER_STATUS_ARBITRATION_LOST))
+        {
             return false;
         }
     }
@@ -220,7 +224,8 @@ static bool I2C_SendBytes(uint8_t *data, uint16_t length)
     // DL_I2C_CONTROLLER_STATUS_ERROR covers address NACK and data NACK
     if (DL_I2C_getControllerStatus(I2C_0_INST) &
         (DL_I2C_CONTROLLER_STATUS_ERROR |
-         DL_I2C_CONTROLLER_STATUS_ARBITRATION_LOST)) {
+         DL_I2C_CONTROLLER_STATUS_ARBITRATION_LOST))
+    {
         return false;
     }
     return true;
@@ -252,10 +257,10 @@ static void LCD_SetCursor(uint8_t row)
 // I2C1 Receive State (double-buffered to close STOP/copy race)
 // =============================================================================
 
-static volatile uint8_t rxBuffer[PEDAL_DATA_SIZE];     // in-flight packet
-static volatile uint8_t readyBuffer[PEDAL_DATA_SIZE];  // last complete packet
-static volatile uint8_t rxCount   = 0;
-static volatile bool    dataReady = false;
+static volatile uint8_t rxBuffer[PEDAL_DATA_SIZE];    // in-flight packet
+static volatile uint8_t readyBuffer[PEDAL_DATA_SIZE]; // last complete packet
+static volatile uint8_t rxCount = 0;
+static volatile bool dataReady = false;
 
 // =============================================================================
 // UI Update
@@ -268,7 +273,8 @@ static void DisplayPedalData(const PedalData *d)
     int p0_pct;
     int p1_pct;
 
-    if (d->effectID >= NUM_EFFECTS) return;
+    if (d->effectID >= NUM_EFFECTS)
+        return;
 
     snprintf(line1, sizeof(line1), "[%-10s]", effectNames[d->effectID]);
 
@@ -293,32 +299,37 @@ static void DisplayPedalData(const PedalData *d)
 
 void I2C1_IRQHandler(void)
 {
-    switch (DL_I2C_getPendingInterrupt(I2C_1_INST)) {
+    switch (DL_I2C_getPendingInterrupt(I2C_1_INST))
+    {
 
-        case DL_I2C_IIDX_TARGET_RX_DONE:
-            // Accumulate bytes into rxBuffer — do NOT set dataReady here.
-            // A packet is only valid once STOP confirms the transaction ended.
-            if (rxCount < PEDAL_DATA_SIZE) {
-                rxBuffer[rxCount++] = DL_I2C_receiveTargetData(I2C_1_INST);
-            } else {
-                (void)DL_I2C_receiveTargetData(I2C_1_INST);
-            }
-            break;
+    case DL_I2C_IIDX_TARGET_RX_DONE:
+        // Accumulate bytes into rxBuffer — do NOT set dataReady here.
+        // A packet is only valid once STOP confirms the transaction ended.
+        if (rxCount < PEDAL_DATA_SIZE)
+        {
+            rxBuffer[rxCount++] = DL_I2C_receiveTargetData(I2C_1_INST);
+        }
+        else
+        {
+            (void)DL_I2C_receiveTargetData(I2C_1_INST);
+        }
+        break;
 
-        case DL_I2C_IIDX_TARGET_STOP:
-            // Atomically promote rxBuffer -> readyBuffer only for full packets.
-            // Short packets (e.g. address probes) are silently dropped so the
-            // last good display values are preserved.
-            if (rxCount == PEDAL_DATA_SIZE) {
-                memcpy((void *)readyBuffer, (const void *)rxBuffer,
-                       PEDAL_DATA_SIZE);
-                dataReady = true;
-            }
-            rxCount = 0;
-            break;
+    case DL_I2C_IIDX_TARGET_STOP:
+        // Atomically promote rxBuffer -> readyBuffer only for full packets.
+        // Short packets (e.g. address probes) are silently dropped so the
+        // last good display values are preserved.
+        if (rxCount == PEDAL_DATA_SIZE)
+        {
+            memcpy((void *)readyBuffer, (const void *)rxBuffer,
+                   PEDAL_DATA_SIZE);
+            dataReady = true;
+        }
+        rxCount = 0;
+        break;
 
-        default:
-            break;
+    default:
+        break;
     }
 }
 
@@ -335,9 +346,9 @@ int main(void)
 
     // NHD datasheet: 100ms power-on settle before first command
     delay_cycles(100 * CYCLES_PER_MS);
-    
-    LCD_SendCommand(0x41, 1);   // Display on   (exec time: 100us)
-    LCD_SendCommand(0x51, 2);   // Clear screen  (exec time: 1.5ms)
+
+    LCD_SendCommand(0x41, 1); // Display on   (exec time: 100us)
+    LCD_SendCommand(0x51, 2); // Clear screen  (exec time: 1.5ms)
 
     LCD_Print("Waiting for");
     LCD_SetCursor(1);
@@ -347,8 +358,10 @@ int main(void)
     // after the LCD is initialised and the startup message is shown
     NVIC_EnableIRQ(I2C_1_INST_INT_IRQN);
 
-    while (1) {
-        if (dataReady) {
+    while (1)
+    {
+        if (dataReady)
+        {
             __disable_irq();
             memcpy(&snapshot, (const void *)readyBuffer, PEDAL_DATA_SIZE);
             dataReady = false;
