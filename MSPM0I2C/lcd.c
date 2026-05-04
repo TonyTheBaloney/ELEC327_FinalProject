@@ -44,7 +44,7 @@
 #define LCD_ADDR 0x28
 #define NUM_EFFECTS 6
 #define NUM_PARAMS 4
-#define PEDAL_DATA_SIZE 5U
+#define PEDAL_DATA_SIZE 6U
 
 #define TOGGLE_PASSTHROUGH_MASK (1 << 0)
 #define TOGGLE_EDITING_MASK       (1 << 1)
