@@ -362,6 +362,7 @@ RTNeural::ModelT<float, 1, 1,
 uint8_t currentEffect = EFFECT_EQ;
 bool passthrough = false;
 bool editingEnabled = false;
+bool prevPassthrough = false;
 bool prevEditing = false;
 
 float lastPotValue[NUM_POTS] = {-1.f, -1.f, -1.f, -1.f};
@@ -867,13 +868,24 @@ int main()
         // relies on the rising edge below to snapshot the baseline).
         // editingEnabled = toggleEdit.Pressed();
         // keep true for the ease of debugging.
-        editingEnabled = toggleEdit.Pressed();
-
+        editingEnabled = toggleEdit.Pressed() && !passthrough;
+        
+        // If the state has change then we need to send update
+        if ((editingEnabled != prevEditing) || (passthrough != prevPassthrough)) {
+            SendDataToMSMP0(currentEffect,
+                effectStates[currentEffect].params[0],
+                effectStates[currentEffect].params[1],
+                effectStates[currentEffect].params[2],
+                effectStates[currentEffect].params[3],
+                passthrough,
+                editingEnabled);
+        }
         // Rising edge of editing gate: snapshot pot positions (pick-up behaviour)
         if (editingEnabled && !prevEditing)
             SyncPotBaseline();
 
         prevEditing = editingEnabled;
+        prevPassthrough = passthrough;
 
         // Push button: cycle effect preset
         if (btnEffectForward.RisingEdge())
