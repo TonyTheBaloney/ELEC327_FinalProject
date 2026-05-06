@@ -5,6 +5,7 @@ description: Daisy Seed digital guitar pedal with classic DSP effects and embedd
 # vendored dependency trees so Jekyll does not try to process third-party docs.
 exclude:
   - AudioProcessing
+  - MSPM0I2C
   - data
   - tools
   - training

@@ -193,7 +193,10 @@
 
     /* ── Device image slot ── */
     .media-grid {
-      max-width: 760px;
+      max-width: 960px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
     }
 
     .media-card {
@@ -699,11 +702,14 @@
     <!-- Device image -->
     <section id="media">
       <div class="container">
-        <p class="section-label fade fade-1">Device Image</p>
-        <h2 class="fade fade-2">Physical device image</h2>
+        <p class="section-label fade fade-1">Device Images</p>
+        <h2 class="fade fade-2">Physical device images</h2>
         <div class="media-grid fade fade-3">
           <article class="media-card">
             <img class="device-image" src="device.jpg" alt="ELEC 327 digital guitar pedal device" />
+          </article>
+          <article class="media-card">
+            <img class="device-image" src="device2.jpg" alt="ELEC 327 digital guitar pedal hardware and wiring" />
           </article>
         </div>
       </div>
