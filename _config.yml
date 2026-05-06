@@ -1,0 +1,11 @@
+title: ELEC 327 Custom Digital Pedal
+description: Daisy Seed digital guitar pedal with classic DSP effects and embedded NeuralSeed GRU inference.
+
+# GitHub Pages builds from the repository root. Exclude firmware, training, and
+# vendored dependency trees so Jekyll does not try to process third-party docs.
+exclude:
+  - AudioProcessing
+  - MSPM0I2C
+  - data
+  - tools
+  - training

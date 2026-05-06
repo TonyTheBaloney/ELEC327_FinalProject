@@ -15,7 +15,8 @@ TARGET = MyDaisyProject
 # -------------------------------------------------------
 LIBDAISY_DIR ?= ./libDaisy
 DAISYSP_DIR  ?= ./DaisySP
-DAISYSP_LGPL_DIR = $(PROJECT_DIR)/DaisySP/DaisySP-LGPL/Source
+RTNEURAL_DIR ?= ./RTNeural
+DAISYSP_LGPL_DIR = $(DAISYSP_DIR)/DaisySP-LGPL/Source
 
 # Source directory
 SRC_DIR  = src
@@ -61,7 +62,10 @@ C_DEFS = \
 	-DCORE_CM7 \
 	-DUSE_FULL_LL_DRIVER \
 	-DHSE_VALUE=16000000 \
-	-DARM_MATH_CM7
+	-DARM_MATH_CM7 \
+	-DFILEIO_ENABLE_FATFS_READER \
+	-DRTNEURAL_DEFAULT_ALIGNMENT=8 \
+	-DRTNEURAL_NO_DEBUG=1
 
 # -------------------------------------------------------
 # Include paths — auto-discovered from library directories
@@ -74,7 +78,7 @@ DAISYSP_INCLUDES  = $(shell find $(DAISYSP_DIR)/Source $(DAISYSP_DIR)/DaisySP-LG
 DAISYSP_LGPL_INCLUDES = $(shell find $(DAISYSP_LGPL_DIR) \
 	-type d | sed 's/^/-I/')
 
-C_INCLUDES = -I$(SRC_DIR) $(LIBDAISY_INCLUDES) $(DAISYSP_INCLUDES) $(DAISYSP_LGPL_INCLUDES)
+C_INCLUDES = -I$(SRC_DIR) -I$(RTNEURAL_DIR) $(LIBDAISY_INCLUDES) $(DAISYSP_INCLUDES) $(DAISYSP_LGPL_INCLUDES)
 # -------------------------------------------------------
 # Compiler flags
 # -------------------------------------------------------

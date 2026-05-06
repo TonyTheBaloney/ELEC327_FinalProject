@@ -13,39 +13,11 @@
  *   Other end→ GND
  *
  * Effect Presets (cycled by push button):
- *   0 – EQ         (pot0=level, pot1=bass(200 Hz), pot2=mid(800 Hz), pot3=treble(4 kHz))
- *                  Each tone band is +/-12 dB; centered knobs => flat (true bypass).
- *   1 – Funk       Compressor -> AutoWah -> AMP -> Reverb chain.
- *                  pot0 = output volume (0..2x linear, 0.5 = unity)
- *                  pot1 = wah swing depth (envelope-driven cutoff motion)
- *                  pot2 = compressor parallel mix (0=dry, 1=fully compressed)
- *                  pot3 = reverb wet/dry mix
- *   2 – Ambient    Chorus -> Delay -> Reverb dreamy chain.
- *                  pot0 = output volume (0..2x linear, 0.5 = unity)
- *                  pot1 = delay length (100..800 ms, linear)
- *                  pot2 = reverb strength (additive wet 0..1)
- *                  pot3 = chorus mix (wet/dry crossfade 0..1)
- * //   2 – Reverb     (pot0=room,  pot1=damping,  pot2=wet,      pot3=spare)
- *   3 – Lead       Boost -> Distortion -> AMP -> CAB(LP@5kHz) -> Reverb -> Delay -> NoiseGate.
- *                  pot0 = output volume (0..2x linear, 0.5 = unity)
- *                  pot1 = gain (combined: pre-boost AND distortion drive sweep together)
- *                  pot2 = reverb + delay depth (shared wet/dry crossfade)
- *                  pot3 = noise gate threshold (0=open, 1 ~ -30 dB amplitude)
- *   4 – HiGain     808-style: gain -> HP@100Hz -> mid-hump@700Hz -> drive -> volume.
- *                  pot0 = output volume (0..2x linear)
- *                  pot1 = gain (input boost, 1..HG808_GAIN_MAX)
- *                  pot2 = distortion drive (0..1, soft-clip intensity)
- *                  pot3 = tone (mid hump 0..+6 dB at 700 Hz)
- *
- * // Earlier preset 0 versions:
- * //   Bypass     (pot0=level, pots 1-3=unused)
- * //   Overdrive  (pot0=drive, pot1=tone,     pot2=level,    pot3=spare)
- * // Earlier preset 1:
- * //   Chorus     (pot0=rate,  pot1=depth,    pot2=mix,      pot3=spare)
- * // Earlier preset 2:
- * //   Reverb     (pot0=room,  pot1=damping,  pot2=wet,      pot3=spare)
- * // Earlier preset 3:
- * //   Phaser     (pot0=rate,  pot1=depth,    pot2=feedback, pot3=spare)
+ *   0 – Overdrive  (pot0=drive, pot1=tone,     pot2=level,    pot3=spare)
+ *   1 – Chorus     (pot0=rate,  pot1=depth,    pot2=mix,      pot3=spare)
+ *   2 – Reverb     (pot0=room,  pot1=damping,  pot2=wet,      pot3=spare)
+ *   3 – Phaser     (pot0=rate,  pot1=depth,    pot2=feedback, pot3=spare)
+ *   4 - NeuralSeed (pot0=input, pot1=mix,      pot2=level,    pot3=reserved)
  */
 
 #include "daisy_seed.h"
@@ -53,29 +25,25 @@
 #include "Effects/reverbsc.h"
 #include "Dynamics/compressor.h"
 #include <math.h>
+#include "NeuralSeedModelData.h"
+#include <RTNeural/RTNeural.h>
 
 using namespace daisy;
 using namespace daisysp;
 
-// ──────────────────────────────────────────────
-// Pin Assignments
-// Use integer indices for GetPin(); ADC pins use seed::A0-style Pin directly.
-// ──────────────────────────────────────────────
+// Potentiometer pin defintions
+static const Pin POT0_PIN = seed::A1;
+static const Pin POT1_PIN = seed::A3;
+static const Pin POT2_PIN = seed::A5;
+static const Pin POT3_PIN = seed::A7;
 
-// Potentiometer wipers — passed directly to AdcChannelConfig::InitSingle
-static const Pin POT0_PIN = seed::A0;
-static const Pin POT1_PIN = seed::A1;
-static const Pin POT2_PIN = seed::A2;
-static const Pin POT3_PIN = seed::A3;
+// Digital switch pins
+static constexpr Pin PIN_TOGGLE_EDIT = seed::D1;          // D1 -> top toggle
+static constexpr Pin PIN_TOGGLE_PASSTHROUGH = seed::D2;   // D2 -> bottom toggle
+static constexpr Pin PIN_BTN_EFFECT_FORWARD = seed::D30;  // D30 -> push button
+static constexpr Pin PIN_BTN_EFFECT_BACKWARD = seed::D29; // D29 -> (optional) second push button for reverse cycling
 
-// Digital switch pin indices (uint8_t) for hw.GetPin()
-static constexpr uint8_t PIN_TOGGLE_EDIT = 0;        // D0 → top toggle
-static constexpr uint8_t PIN_TOGGLE_PASSTHROUGH = 1; // D1 → bottom toggle
-static constexpr uint8_t PIN_BTN_EFFECT_CYCLE = 2;   // D2 → push button
-
-// ──────────────────────────────────────────────
-// ADC channel indices (must match Init order)
-// ──────────────────────────────────────────────
+// ADC channel indices
 static constexpr int ADC_POT0 = 0;
 static constexpr int ADC_POT1 = 1;
 static constexpr int ADC_POT2 = 2;
@@ -83,13 +51,11 @@ static constexpr int ADC_POT3 = 3;
 static constexpr int NUM_ADC = 4;
 static constexpr int NUM_POTS = 4;
 
-// ──────────────────────────────────────────────
 // Constants
-// ──────────────────────────────────────────────
-
-static constexpr int NUM_EFFECTS = 5;
+static constexpr int NUM_EFFECTS = 6;
 static constexpr float SAMPLE_RATE = 48000.f;
 static constexpr float ADC_DEADBAND = 0.005f; // ~0.5% — suppresses pot noise
+static constexpr float SWITCH_UPDATE_RATE_HZ = 1000.f;
 
 // EQ band geometry — fixed corners/center, only gains move with pots
 static constexpr float EQ_BASS_FC = 200.f;    // Hz, low-shelf corner
@@ -98,9 +64,10 @@ static constexpr float EQ_MID_Q = 0.7f;       // ~1 octave wide, musical default
 static constexpr float EQ_TREBLE_FC = 4000.f; // Hz, high-shelf corner
 static constexpr float EQ_GAIN_DB = 12.f;
 static constexpr float TWO_PI = 6.28318530717958647692f;
+static constexpr float HALF_PI = 1.57079632679489661923f;
 
 // Lead preset (preset 3) tuning
-static constexpr float LEAD_BOOST_MAX = 2.f;     // pot0 max boost (~+6 dB); was 3.f / 5.f earlier
+static constexpr float LEAD_BOOST_MAX = 2.f; // pot0 max boost (~+6 dB); was 3.f / 5.f earlier
 static constexpr float LEAD_AMP_DRIVE = 0.2f;
 static constexpr float LEAD_CAB_FC = 5000.f;
 static constexpr float LEAD_CAB_Q = 0.7f;
@@ -123,7 +90,7 @@ static constexpr float AMBIENT_CHORUS_DEPTH = 0.7f;
 
 // High-gain 808-style preset (preset 4) tuning
 static constexpr float HG808_GAIN_MAX = 8.f; // pot1 input boost ceiling (~+18 dB; was 10/5 earlier)
-static constexpr float HG808_HP_FC = 100.f;   // tighten lows before clipper
+static constexpr float HG808_HP_FC = 100.f;  // tighten lows before clipper
 static constexpr float HG808_HP_Q = 0.7f;
 static constexpr float HG808_PEAK_FC = 700.f; // TS-808 signature mid hump
 static constexpr float HG808_PEAK_Q = 1.0f;
@@ -145,7 +112,8 @@ enum Effect : uint8_t
     // EFFECT_REVERB,         // earlier preset 2 (simple knob-set reverb)
     EFFECT_LEAD,
     // EFFECT_PHASER          // earlier preset 3
-    EFFECT_HIGAIN // High-gain 808-style: gain -> HP -> mid hump -> +noise -> drive -> volume
+    EFFECT_HIGAIN, // High-gain 808-style: gain -> HP -> mid hump -> +noise -> drive -> volume
+    EFFECT_NEURALSEED
 };
 
 struct EffectState
@@ -158,18 +126,23 @@ static EffectState effectStates[NUM_EFFECTS] = {
     {{0.5f, 0.7f, 0.5f, 0.25f}}, // Funk: unity vol, deep wah, half-blend comp, subtle verb
     {{0.5f, 0.6f, 0.5f, 0.4f}},  // Ambient: unity vol, med-long delay, moderate verb, half chorus
     {{0.3f, 0.5f, 0.4f, 0.3f}},  // Lead: 0.6x volume, mid gain, light depth, mild gate
-    {{0.3f, 0.4f, 0.5f, 0.7f}},   // HiGain 808: 0.6x vol, mod gain, mid drive, full mid-hump tone
+    {{0.3f, 0.4f, 0.5f, 0.7f}},  // HiGain 808: 0.6x vol, mod gain, mid drive, full mid-hump tone
+    {{0.5f, 1.0f, 1.0f, 0.5f}}   // NeuralSeed: audible default, full wet/full level
 };
+#define TOGGLE_PASSTHROUGH_IDX 0
+#define TOGGLE_EDITING_IDX 1
+#define TOGGLE_PASSTHROUGH_MASK (1 << TOGGLE_PASSTHROUGH_IDX)
+#define TOGGLE_EDITING_MASK       (1 << TOGGLE_EDITING_IDX)
 
-
-struct __attribute__((packed)) PedalData {
+struct __attribute__((packed)) PedalData
+{
     uint8_t effectID; // 0 = EQ, 1 = Funk, 2 = Ambient, 3 = Lead, 4 = HiGain
     uint8_t pot0;     // 0-255
     uint8_t pot1;     // 0-255
     uint8_t pot2;     // 0-255
     uint8_t pot3;     // 0-255
+    uint8_t states;  // Bitfield for toggle states. Bit 0 = passthrough, Bit 1 = editing mode
 };
-
 
 // ──────────────────────────────────────────────
 // Global hardware & DSP objects
@@ -177,12 +150,13 @@ struct __attribute__((packed)) PedalData {
 
 DaisySeed hw;
 I2CHandle i2c;
-//  I2C address of MSMP0 
+//  I2C address of MSMP0
 // CHANGE TO 21 OR 84 IF DOESN"T WORK!!!
-const uint8_t MSMP0_I2C_ADDRESS = 0x42;
+const uint8_t MSMP0_I2C_ADDRESS = 0x48;
 Switch toggleEdit;
 Switch togglePassthrough;
-Switch btnEffectCycle;
+Switch btnEffectForward;
+Switch btnEffectBackward; // optional second button for reverse cycling through presets
 
 // Overdrive overdrive;   // preset 0 is now EQ; no DSP object needed
 Chorus chorus;   // shared by Ambient (preset 2)
@@ -366,6 +340,11 @@ Overdrive hg808Drive; // saturation stage
 //     return (float)((int32_t)(lcg & 0x00FFFFFFu) - 0x00800000) * (1.f / 0x00800000);
 // }
 
+RTNeural::ModelT<float, 1, 1,
+                 RTNeural::GRULayerT<float, 1, 10>,
+                 RTNeural::DenseT<float, 10, 1>>
+    neuralModel;
+
 // ──────────────────────────────────────────────
 // Runtime state
 // ──────────────────────────────────────────────
@@ -373,6 +352,7 @@ Overdrive hg808Drive; // saturation stage
 uint8_t currentEffect = EFFECT_EQ;
 bool passthrough = false;
 bool editingEnabled = false;
+bool prevPassthrough = false;
 bool prevEditing = false;
 
 float lastPotValue[NUM_POTS] = {-1.f, -1.f, -1.f, -1.f};
@@ -396,6 +376,22 @@ void SyncPotBaseline()
 {
     for (int i = 0; i < NUM_POTS; i++)
         lastPotValue[i] = ReadPot(i);
+}
+
+void InitNeuralSeedModel()
+{
+    NeuralSeedModelData neuralData = CreateSelectedNeuralSeedModelData();
+
+    auto &gru = neuralModel.get<0>();
+    auto &dense = neuralModel.get<1>();
+
+    gru.setWVals(neuralData.rec_weight_ih_l0);
+    gru.setUVals(neuralData.rec_weight_hh_l0);
+    gru.setBVals(neuralData.rec_bias);
+    dense.setWeights(neuralData.lin_weight);
+    dense.setBias(neuralData.lin_bias.data());
+
+    neuralModel.reset();
 }
 
 // ──────────────────────────────────────────────
@@ -460,8 +456,8 @@ void ApplyEffectState()
     case EFFECT_LEAD:
     {
         // Knob-driven parameters that need a setter call.
-        distortion.SetDrive(s.params[1]);                              // pot1 = combined gain knob
-        noiseGate.SetThreshold(s.params[3] * NOISE_GATE_MAX_THRESH);   // pot3 = gate threshold
+        distortion.SetDrive(s.params[1]);                            // pot1 = combined gain knob
+        noiseGate.SetThreshold(s.params[3] * NOISE_GATE_MAX_THRESH); // pot3 = gate threshold
         // Re-assert lead-flavored reverb voicing in case preset 2 overwrote it.
         reverb.SetFeedback(LEAD_REVERB_FB);
         reverb.SetLpFreq(LEAD_REVERB_LP);
@@ -473,9 +469,11 @@ void ApplyEffectState()
     //     phaser.SetFeedback(s.params[2]);
     //     break;
     case EFFECT_HIGAIN:
-        hg808Drive.SetDrive(s.params[2]);                                                  // pot2 = drive
+        hg808Drive.SetDrive(s.params[2]); // pot2 = drive
         hg808Peak.SetPeak(SAMPLE_RATE, HG808_PEAK_FC, HG808_PEAK_Q,
-                          s.params[3] * HG808_PEAK_GAIN_DB);                               // pot3 = tone (mid hump)
+                          s.params[3] * HG808_PEAK_GAIN_DB); // pot3 = tone (mid hump)
+        break;
+    case EFFECT_NEURALSEED:
         break;
     }
 }
@@ -542,9 +540,9 @@ void AudioCallback(AudioHandle::InputBuffer in,
             // pot1 = compressor parallel mix (here, per-sample)
             // pot2 = reverb wet/dry (here, per-sample)
             // pot3 = output gain (here, per-sample, 0..2x linear)
-            const float out_gain = s.params[0] * 2.f;   // pot0 = output volume
-            const float comp_mix = s.params[2];          // pot2 = compressor parallel mix
-            const float reverb_mix = s.params[3];        // pot3 = reverb wet/dry
+            const float out_gain = s.params[0] * 2.f; // pot0 = output volume
+            const float comp_mix = s.params[2];       // pot2 = compressor parallel mix
+            const float reverb_mix = s.params[3];     // pot3 = reverb wet/dry
 
             // 1. Parallel compression: blend dry with fully-compressed.
             float dry = inL;
@@ -586,9 +584,9 @@ void AudioCallback(AudioHandle::InputBuffer in,
             // pot1 = reverb strength (additive)
             // pot2 = chorus mix (crossfade)
             // pot3 = output gain
-            const float out_gain = s.params[0] * 2.f;   // pot0 = output volume
-            const float reverb_str = s.params[2];        // pot2 = reverb strength
-            const float chorus_mix = s.params[3];        // pot3 = chorus mix
+            const float out_gain = s.params[0] * 2.f; // pot0 = output volume
+            const float reverb_str = s.params[2];     // pot2 = reverb strength
+            const float chorus_mix = s.params[3];     // pot3 = chorus mix
 
             // 1. Chorus: dry/wet crossfade.
             float chOut = chorus.Process(inL);
@@ -629,7 +627,7 @@ void AudioCallback(AudioHandle::InputBuffer in,
             // pot3 = distortion drive (set in ApplyEffectState)
             const float volume = s.params[0] * 2.f;                              // pot0 = output volume
             const float boost_gain = 1.f + s.params[1] * (LEAD_BOOST_MAX - 1.f); // pot1 = gain (boost half)
-            const float wet_mix = s.params[2];                                    // pot2 = reverb/delay depth
+            const float wet_mix = s.params[2];                                   // pot2 = reverb/delay depth
 
             float x = inL * boost_gain;
             x = distortion.Process(x);
@@ -673,8 +671,20 @@ void AudioCallback(AudioHandle::InputBuffer in,
             outR = x;
             break;
         }
+        case EFFECT_NEURALSEED:
+        {
+            // pot0=input gain, pot1=dry/wet mix, pot2=output level
+            float gainedIn = inL * (s.params[0] * 3.f);
+            float neuralIn[1] = {gainedIn};
+            float wet = neuralModel.forward(neuralIn) + inL;
+            float mix = s.params[1];
+            float dryGain = cosf(mix * HALF_PI);
+            float wetGain = sinf(mix * HALF_PI);
+            outL = (inL * dryGain + wet * wetGain) * s.params[2];
+            outR = outL;
+            break;
         }
-
+        }
         out[0][i] = outL;
         out[1][i] = outR;
     }
@@ -684,7 +694,8 @@ void AudioCallback(AudioHandle::InputBuffer in,
 // it is written from the control loop and may be read from elsewhere.
 volatile bool msmp0LinkOk = false;
 
-void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3) {
+void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3, bool passthrough, bool editing)
+{
     PedalData data;
     data.effectID = effect;
     // Convert 0.0 - 1.0 float values to 0 - 255 integer values
@@ -692,12 +703,13 @@ void SendDataToMSMP0(uint8_t effect, float p0, float p1, float p2, float p3) {
     data.pot1 = (uint8_t)(p1 * 255.0f);
     data.pot2 = (uint8_t)(p2 * 255.0f);
     data.pot3 = (uint8_t)(p3 * 255.0f);
+    data.states = ((passthrough & 0x1) << TOGGLE_PASSTHROUGH_IDX) | ((editing & 0x1) << TOGGLE_EDITING_IDX);
 
     // Capture the result instead of discarding it. A NACK (LCD/MSPM0 missing
     // or unpowered) used to fall through silently and the caller would think
     // the screen was being updated. We now expose link health via msmp0LinkOk.
     I2CHandle::Result r = i2c.TransmitBlocking(MSMP0_I2C_ADDRESS,
-                                               (uint8_t*)&data,
+                                               (uint8_t *)&data,
                                                sizeof(PedalData),
                                                100);
     msmp0LinkOk = (r == I2CHandle::Result::OK);
@@ -722,9 +734,9 @@ int main()
     // ── I2C init (MSPM0 link) ─────────────────
     // Daisy is the bus master; MSPM0 listens at MSMP0_I2C_ADDRESS.
     I2CHandle::Config i2c_conf;
-    i2c_conf.periph         = I2CHandle::Config::Peripheral::I2C_1;
-    i2c_conf.mode           = I2CHandle::Config::Mode::I2C_MASTER;
-    i2c_conf.speed          = I2CHandle::Config::Speed::I2C_100KHZ;
+    i2c_conf.periph = I2CHandle::Config::Peripheral::I2C_1;
+    i2c_conf.mode = I2CHandle::Config::Mode::I2C_MASTER;
+    i2c_conf.speed = I2CHandle::Config::Speed::I2C_100KHZ;
     i2c_conf.pin_config.scl = daisy::seed::D11;
     i2c_conf.pin_config.sda = daisy::seed::D12;
     i2c.Init(i2c_conf);
@@ -740,23 +752,27 @@ int main()
     hw.adc.Start();
 
     // ── Switch init ───────────────────────────
-    // Switch::Init(Pin, debounce_ms, type, polarity)
+    // Switch::Init(Pin, update_rate_hz, type, polarity)
     // hw.GetPin(uint8_t) returns a Pin for digital GPIO pins
-    toggleEdit.Init(hw.GetPin(PIN_TOGGLE_EDIT),
-                    1000,
-                    Switch::TYPE_MOMENTARY,
-                    Switch::POLARITY_INVERTED);
+    toggleEdit.Init(PIN_TOGGLE_EDIT,
+                    SWITCH_UPDATE_RATE_HZ,
+                    Switch::TYPE_TOGGLE,
+                    Switch::POLARITY_NORMAL); // inverted: ON = GND, OFF = floating with pullup
 
-    togglePassthrough.Init(hw.GetPin(PIN_TOGGLE_PASSTHROUGH),
-                           1000,
-                           Switch::TYPE_MOMENTARY,
+    togglePassthrough.Init(PIN_TOGGLE_PASSTHROUGH,
+                           SWITCH_UPDATE_RATE_HZ,
+                           Switch::TYPE_TOGGLE,
                            Switch::POLARITY_INVERTED);
 
-    btnEffectCycle.Init(hw.GetPin(PIN_BTN_EFFECT_CYCLE),
-                        1000,
-                        Switch::TYPE_MOMENTARY,
-                        Switch::POLARITY_INVERTED);
+    btnEffectForward.Init(PIN_BTN_EFFECT_FORWARD,
+                          SWITCH_UPDATE_RATE_HZ,
+                          Switch::TYPE_MOMENTARY,
+                          Switch::POLARITY_NORMAL);
 
+    btnEffectBackward.Init(PIN_BTN_EFFECT_BACKWARD,
+                           1000,
+                           Switch::TYPE_MOMENTARY,
+                           Switch::POLARITY_NORMAL);
     // ── DSP init ──────────────────────────────
     // overdrive.Init();
     // overdrive.SetDrive(0.5f);
@@ -816,6 +832,9 @@ int main()
     hg808Peak.Reset();
     hg808Drive.Init();
     hg808Drive.SetDrive(0.5f);
+
+    InitNeuralSeedModel();
+
     ApplyEffectState();
 
     // ── Start audio ───────────────────────────
@@ -826,7 +845,8 @@ int main()
     {
         toggleEdit.Debounce();
         togglePassthrough.Debounce();
-        btnEffectCycle.Debounce();
+        btnEffectForward.Debounce();
+        btnEffectBackward.Debounce();
 
         // Bottom toggle: passthrough (reads live physical state)
         passthrough = togglePassthrough.Pressed();
@@ -837,28 +857,59 @@ int main()
         // when the top switch is engaged (pick-up / catch-up behaviour
         // relies on the rising edge below to snapshot the baseline).
         // editingEnabled = toggleEdit.Pressed();
-        // keep true for the ease of debugging. 
-        editingEnabled = true;
-
+        // keep true for the ease of debugging.
+        editingEnabled = toggleEdit.Pressed() && !passthrough;
+        
+        // If the state has change then we need to send update
+        if ((editingEnabled != prevEditing) || (passthrough != prevPassthrough)) {
+            SendDataToMSMP0(currentEffect,
+                effectStates[currentEffect].params[0],
+                effectStates[currentEffect].params[1],
+                effectStates[currentEffect].params[2],
+                effectStates[currentEffect].params[3],
+                passthrough,
+                editingEnabled);
+        }
         // Rising edge of editing gate: snapshot pot positions (pick-up behaviour)
         if (editingEnabled && !prevEditing)
             SyncPotBaseline();
 
         prevEditing = editingEnabled;
+        prevPassthrough = passthrough;
 
         // Push button: cycle effect preset
-        if (btnEffectCycle.RisingEdge())
+        if (btnEffectForward.RisingEdge())
         {
             currentEffect = (currentEffect + 1) % NUM_EFFECTS;
             ApplyEffectState();
+            if (currentEffect == EFFECT_NEURALSEED)
+                neuralModel.reset();
             SyncPotBaseline();
             
+            SendDataToMSMP0(currentEffect,
+                effectStates[currentEffect].params[0],
+                effectStates[currentEffect].params[1],
+                effectStates[currentEffect].params[2],
+                effectStates[currentEffect].params[3],
+                passthrough,
+                editingEnabled);
+        }
+        if (btnEffectBackward.RisingEdge())
+        {
+            currentEffect = (currentEffect + NUM_EFFECTS - 1) % NUM_EFFECTS;
+            ApplyEffectState();
+            if (currentEffect == EFFECT_NEURALSEED)
+                neuralModel.reset();
+            SyncPotBaseline();
+
             // SEND TO LCD: Preset changed
-            SendDataToMSMP0(currentEffect, 
+            SendDataToMSMP0(currentEffect,
                             effectStates[currentEffect].params[0],
                             effectStates[currentEffect].params[1],
                             effectStates[currentEffect].params[2],
-                            effectStates[currentEffect].params[3]);
+                            effectStates[currentEffect].params[3],
+                            passthrough,
+                            editingEnabled);
         }
 
         // Pots → effect parameter state (only when editing, not bypassed)
@@ -879,16 +930,17 @@ int main()
             }
 
             if (changed)
-                {ApplyEffectState();
+            {
+                ApplyEffectState();
 
-                SendDataToMSMP0(currentEffect, 
-                            effectStates[currentEffect].params[0],
-                            effectStates[currentEffect].params[1],
-                            effectStates[currentEffect].params[2],
-                            effectStates[currentEffect].params[3]);
-                
-        }   
-        
+                SendDataToMSMP0(currentEffect,
+                                effectStates[currentEffect].params[0],
+                                effectStates[currentEffect].params[1],
+                                effectStates[currentEffect].params[2],
+                                effectStates[currentEffect].params[3],
+                                passthrough,
+                                editingEnabled);
+            }
+        }
     }
-}
 }
