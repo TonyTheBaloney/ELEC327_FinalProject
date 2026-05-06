@@ -6,10 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// =============================================================================
 // Board / Peripheral Definitions
-// =============================================================================
-
 #define CPUCLK_FREQ 32000000U
 
 #define I2C_0_INST I2C0
@@ -19,7 +16,7 @@
 #define MSPM0_ADDR 0x48
 // I2C0 — PA0=SCL, PA1=SDA
 #define I2C0_SDA_IOMUX IOMUX_PINCM1
-#define I2C0_SCL_IOMUX IOMUX_PINCM2 // PINCM value from table
+#define I2C0_SCL_IOMUX IOMUX_PINCM2                // PINCM value from table
 #define I2C0_SDA_PINCM_PF IOMUX_PINCM1_PF_I2C0_SDA // PF3
 #define I2C0_SCL_PINCM_PF IOMUX_PINCM2_PF_I2C0_SCL // PF3
 
@@ -37,17 +34,14 @@
 #define CYCLES_PER_MS (CPUCLK_FREQ / 1000U)
 #define POWER_STARTUP_DELAY 16U
 
-// =============================================================================
 // Config & Data Structures
-// =============================================================================
-
 #define LCD_ADDR 0x28
 #define NUM_EFFECTS 6
 #define NUM_PARAMS 4
 #define PEDAL_DATA_SIZE 6U
 
 #define TOGGLE_PASSTHROUGH_MASK (1 << 0)
-#define TOGGLE_EDITING_MASK       (1 << 1)
+#define TOGGLE_EDITING_MASK (1 << 1)
 
 typedef struct __attribute__((packed))
 {
@@ -56,7 +50,7 @@ typedef struct __attribute__((packed))
     uint8_t pot1;
     uint8_t pot2;
     uint8_t pot3;
-    uint8_t states; // Bitfield for toggle states. 
+    uint8_t states; // Bitfield for toggle states.
 } PedalData;
 
 static const char *effectNames[NUM_EFFECTS] = {
@@ -71,10 +65,9 @@ static const char *paramNames[NUM_EFFECTS][NUM_PARAMS] = {
     {"Volume", "Wet", "Output", "-"}, // NeuralSeed params are custom, so just label generically
 };
 
-// =============================================================================
-// I2C0 Peripheral Init — Controller (Master) -> LCD at 50 KHz
-// =============================================================================
-
+/**
+ * Initialize I2C0 as a controller to control the LCD
+ */
 static void I2C0_Controller_Init(void)
 {
     DL_GPIO_initPeripheralInputFunctionFeatures(
@@ -98,7 +91,6 @@ static void I2C0_Controller_Init(void)
     DL_I2C_setTimerPeriod(I2C_0_INST, 63); // 50kHz
     DL_I2C_enableControllerClockStretching(I2C_0_INST);
 
-    // Set trigger levels — no flush needed after clean reset
     I2C_0_INST->MASTER.MFIFOCTL =
         I2C_MFIFOCTL_TXTRIG_LEVEL_1 |
         I2C_MFIFOCTL_RXTRIG_LEVEL_1;
@@ -106,10 +98,7 @@ static void I2C0_Controller_Init(void)
     DL_I2C_enableController(I2C_0_INST);
 }
 
-// =============================================================================
-// I2C1 Peripheral Init — Target (Slave) <- Daisy Seed
-// =============================================================================
-
+// I2C1 Peripheral Init Target
 static void I2C1_Target_Init(void)
 {
     DL_GPIO_initPeripheralInputFunctionFeatures(
@@ -131,7 +120,7 @@ static void I2C1_Target_Init(void)
     DL_I2C_selectClockSource(I2C_1_INST, DL_I2C_CLOCK_BUSCLK);
     DL_I2C_selectClockDivider(I2C_1_INST, DL_I2C_CLOCK_DIVIDE_1);
 
-    // Set and enable our own address — Daisy Seed must write to this address
+    // Set our own address
     DL_Common_updateReg(&I2C1->SLAVE.SOAR, MSPM0_ADDR, I2C_SOAR_OAR_MASK);
     I2C1->SLAVE.SOAR |= I2C_SOAR_OAREN_ENABLE;
 
@@ -139,15 +128,12 @@ static void I2C1_Target_Init(void)
     I2C1->SLAVE.SCTR |= I2C_SCTR_SCLKSTRETCH_ENABLE;
 
     I2C1->CPU_INT.IMASK |= DL_I2C_INTERRUPT_TARGET_RX_DONE |
-            DL_I2C_INTERRUPT_TARGET_STOP;
+                           DL_I2C_INTERRUPT_TARGET_STOP;
 
     I2C1->SLAVE.SCTR |= I2C_SCTR_ACTIVE_ENABLE;
 }
 
-// =============================================================================
 // Board Init
-// =============================================================================
-
 static void MyBoard_Init(void)
 {
     DL_SYSCTL_setSYSOSCFreq(SYSCTL_CLKSTATUS_SYSOSCFREQ_SYSOSC32M);
@@ -182,10 +168,11 @@ static void MyBoard_Init(void)
     I2C1_Target_Init();
 }
 
-// =============================================================================
-// I2C0 LCD Hardware Driver
-// =============================================================================
-
+/**
+ * A function to send bytes through i2c
+ *
+ * Returns true if the transmission was successful, false if an error or arbitration loss occurred.
+ */
 static bool I2C_SendBytes(uint8_t *data, uint16_t length)
 {
     uint16_t i;
@@ -208,7 +195,6 @@ static bool I2C_SendBytes(uint8_t *data, uint16_t length)
         DL_I2C_transmitControllerData(I2C_0_INST, data[i]);
     }
 
-    // Wait for IDLE not BUSY_BUS — BUSY_BUS clears while FIFO still drains
     while (!(DL_I2C_getControllerStatus(I2C_0_INST) &
              DL_I2C_CONTROLLER_STATUS_IDLE))
     {
@@ -220,8 +206,6 @@ static bool I2C_SendBytes(uint8_t *data, uint16_t length)
         }
     }
 
-    // DL_I2C_CONTROLLER_STATUS_ADDR_NACK is not in this SDK version —
-    // DL_I2C_CONTROLLER_STATUS_ERROR covers address NACK and data NACK
     if (DL_I2C_getControllerStatus(I2C_0_INST) &
         (DL_I2C_CONTROLLER_STATUS_ERROR |
          DL_I2C_CONTROLLER_STATUS_ARBITRATION_LOST))
@@ -253,27 +237,22 @@ static void LCD_SetCursor(uint8_t row)
     delay_cycles(1 * CYCLES_PER_MS);
 }
 
-// =============================================================================
 // I2C1 Receive State (double-buffered to close STOP/copy race)
-// =============================================================================
-
 static volatile uint8_t rxBuffer[PEDAL_DATA_SIZE];    // in-flight packet
 static volatile uint8_t readyBuffer[PEDAL_DATA_SIZE]; // last complete packet
 static volatile uint8_t rxCount = 0;
 static volatile bool dataReady = false;
 
-// =============================================================================
-// Display State
-// =============================================================================
+// Display State for LCD
 
-#define PAGE_INTERVAL_MS  2000U
-#define LOCK_DURATION_MS  2000U
+#define PAGE_INTERVAL_MS 2000U
+#define LOCK_DURATION_MS 2000U
 
-static uint32_t displayTimer  = 0;
-static uint32_t lockTimer     = 0;
-static bool     displayLocked = false;
-static uint8_t  displayPage   = 0;   // 0 = pot1/2, 1 = pot2/3
-static PedalData lastData     = {0};
+static uint32_t displayTimer = 0;
+static uint32_t lockTimer = 0;
+static bool displayLocked = false;
+static uint8_t displayPage = 0; // 0 = pot1/2, 1 = pot2/3
+static PedalData lastData = {0};
 
 // Called once per ms from main loop — drives page cycling
 static void DisplayTick(void)
@@ -311,16 +290,15 @@ static void DisplayPedalData(const PedalData *d)
     const char *nameA;
     const char *nameB;
     uint8_t rawA, rawB;
-    
 
-    
     bool passthrough = (d->states & TOGGLE_PASSTHROUGH_MASK) != 0;
     bool canEdit = (d->states & TOGGLE_EDITING_MASK) != 0;
 
     if (d->effectID >= NUM_EFFECTS)
         return;
 
-    // ── Line 1: effect name + mode indicator + volume ──────────────────────────
+    // This formats the first line
+    // The format is "EffectName [P/E] V: 00%"
     FormatPct(vVol, sizeof(vVol), d->pot0);
 
     const char *modeTag = "";
@@ -332,102 +310,104 @@ static void DisplayPedalData(const PedalData *d)
         modeTag = "   ";
 
     snprintf(line1, sizeof(line1), "%-8.8s%s V:%s",
-            effectNames[d->effectID], modeTag, vVol);
+             effectNames[d->effectID], modeTag, vVol);
 
-    // ── Line 2: bypass message or normal params ─────────────────────────────────
+    // Format for second line
+    // If we have passthrough, just show a bypass message
     if (passthrough)
     {
         snprintf(line2, sizeof(line2), "  -- BYPASS --  ");
     }
     else
     {
+        // Else display the menu we have
         if (displayPage == 0)
         {
-            rawA  = d->pot1; nameA = paramNames[d->effectID][1];
-            rawB  = d->pot2; nameB = paramNames[d->effectID][2];
+            rawA = d->pot1;
+            nameA = paramNames[d->effectID][1];
+            rawB = d->pot2;
+            nameB = paramNames[d->effectID][2];
         }
         else
         {
-            rawA  = d->pot2; nameA = paramNames[d->effectID][2];
-            rawB  = d->pot3; nameB = paramNames[d->effectID][3];
+            rawA = d->pot2;
+            nameA = paramNames[d->effectID][2];
+            rawB = d->pot3;
+            nameB = paramNames[d->effectID][3];
         }
 
         FormatPct(vA, sizeof(vA), rawA);
         FormatPct(vB, sizeof(vB), rawB);
 
         snprintf(line2, sizeof(line2), "%.4s:%-4s%.4s:%-4s",
-                nameA, vA, nameB, vB);
+                 nameA, vA, nameB, vB);
     }
 
+    // Send to LCD
     LCD_SetCursor(0);
     LCD_Print(line1);
     LCD_SetCursor(1);
     LCD_Print(line2);
 }
 
-// =============================================================================
-// Packet Handler — call this wherever you process dataReady in main loop
-// =============================================================================
-
+/**
+ * Handles a new PedalData packet from the Daisy Seed, updating the display state
+ */
 static void HandleNewPacket(const PedalData *d)
 {
     bool pot1Changed = (d->pot1 != lastData.pot1);
     bool pot2Changed = (d->pot2 != lastData.pot2);
-    bool hasPot3 = (paramNames[d->effectID][3][0] != '-'); // check if param 3 is "None"
+    bool hasPot3 = (paramNames[d->effectID][3][0] != '-');      // check if param 3 is "None"
     bool pot3Changed = (d->pot3 != lastData.pot3) && (hasPot3); // ignore pot3 changes if param 3 is "None"
     bool effectChanged = (d->effectID != lastData.effectID);
 
     if (effectChanged)
     {
         // Effect switch: reset to page 0, no lock — let user see all params
-        displayPage   = 0;
+        displayPage = 0;
 
-        // Lock if the new effect doesn't have a pot3 
+        // Lock if the new effect doesn't have a pot3
         displayLocked = !hasPot3;
     }
     else if (pot1Changed && !pot3Changed)
     {
         // pot1 moving: lock to page 0 (pot1+pot2)
-        displayPage   = 0;
+        displayPage = 0;
         displayLocked = true;
-        lockTimer     = displayTimer;
+        lockTimer = displayTimer;
     }
     else if (pot3Changed && !pot1Changed)
     {
         // pot3 moving: lock to page 1 (pot2+pot3)
-        displayPage   = 1;
+        displayPage = 1;
         displayLocked = true;
-        lockTimer     = displayTimer;
+        lockTimer = displayTimer;
     }
     else if (pot2Changed)
     {
         // pot2 is shared — stay on current page, just lock it
         displayLocked = true;
-        lockTimer     = displayTimer;
+        lockTimer = displayTimer;
     }
     else if (pot1Changed && pot3Changed)
     {
         // Both outer pots moving simultaneously — stay on current page
         displayLocked = true;
-        lockTimer     = displayTimer;
+        lockTimer = displayTimer;
     }
 
     lastData = *d;
     DisplayPedalData(d);
 }
-
-// =============================================================================
-// I2C1 IRQ Handler
-// =============================================================================
-
+/**
+ * Apply the current effect state to the DSP objects.
+ */
 void I2C1_IRQHandler(void)
 {
     switch (DL_I2C_getPendingInterrupt(I2C_1_INST))
     {
 
     case DL_I2C_IIDX_TARGET_RX_DONE:
-        // Accumulate bytes into rxBuffer — do NOT set dataReady here.
-        // A packet is only valid once STOP confirms the transaction ended.
         if (rxCount < PEDAL_DATA_SIZE)
         {
             rxBuffer[rxCount++] = DL_I2C_receiveTargetData(I2C_1_INST);
@@ -439,9 +419,6 @@ void I2C1_IRQHandler(void)
         break;
 
     case DL_I2C_IIDX_TARGET_STOP:
-        // Atomically promote rxBuffer -> readyBuffer only for full packets.
-        // Short packets (e.g. address probes) are silently dropped so the
-        // last good display values are preserved.
         if (rxCount == PEDAL_DATA_SIZE)
         {
             memcpy((void *)readyBuffer, (const void *)rxBuffer,

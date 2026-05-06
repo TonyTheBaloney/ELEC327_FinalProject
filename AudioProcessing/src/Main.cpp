@@ -31,26 +31,19 @@
 using namespace daisy;
 using namespace daisysp;
 
-// ──────────────────────────────────────────────
-// Pin Assignments
-// Use integer indices for GetPin(); ADC pins use seed::A0-style Pin directly.
-// ──────────────────────────────────────────────
-
-// Potentiometer wipers — passed directly to AdcChannelConfig::InitSingle
+// Potentiometer pin defintions
 static const Pin POT0_PIN = seed::A1;
 static const Pin POT1_PIN = seed::A3;
 static const Pin POT2_PIN = seed::A5;
 static const Pin POT3_PIN = seed::A7;
 
-// Digital switch pin indices (uint8_t) for hw.GetPin()
+// Digital switch pins
 static constexpr Pin PIN_TOGGLE_EDIT = seed::D1;          // D1 -> top toggle
 static constexpr Pin PIN_TOGGLE_PASSTHROUGH = seed::D2;   // D2 -> bottom toggle
-static constexpr Pin PIN_BTN_EFFECT_FORWARD = seed::D30;  // D3 -> push button
-static constexpr Pin PIN_BTN_EFFECT_BACKWARD = seed::D29; // D4 -> (optional) second push button for reverse cycling
+static constexpr Pin PIN_BTN_EFFECT_FORWARD = seed::D30;  // D30 -> push button
+static constexpr Pin PIN_BTN_EFFECT_BACKWARD = seed::D29; // D29 -> (optional) second push button for reverse cycling
 
-// ──────────────────────────────────────────────
-// ADC channel indices (must match Init order)
-// ──────────────────────────────────────────────
+// ADC channel indices
 static constexpr int ADC_POT0 = 0;
 static constexpr int ADC_POT1 = 1;
 static constexpr int ADC_POT2 = 2;
@@ -58,10 +51,7 @@ static constexpr int ADC_POT3 = 3;
 static constexpr int NUM_ADC = 4;
 static constexpr int NUM_POTS = 4;
 
-// ──────────────────────────────────────────────
 // Constants
-// ──────────────────────────────────────────────
-
 static constexpr int NUM_EFFECTS = 6;
 static constexpr float SAMPLE_RATE = 48000.f;
 static constexpr float ADC_DEADBAND = 0.005f; // ~0.5% — suppresses pot noise
